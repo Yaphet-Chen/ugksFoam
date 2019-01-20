@@ -1,0 +1,5 @@
+ugksFoam.C
+fvDVM.C
+DiscreteVelocityPoint.C
+
+EXE = $(FOAM_USER_APPBIN)/ugksFoam
