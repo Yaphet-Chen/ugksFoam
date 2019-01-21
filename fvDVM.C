@@ -154,39 +154,11 @@ void Foam::fvDVM::initialiseDV(scalarList &weights1D, scalarList &Xis1D)
 
 void Foam::fvDVM::SetLocalFrame()
 {
-    const surfaceVectorField nf = mesh_.Sf() / mesh_.magSf();
+    const surfaceVectorField nf(mesh_.Sf() / mesh_.magSf());
     // Internal faces
     forAll(nf, facei)
     {
-        const vector a = nf[facei];
-        vector t;
-        if ((abs(a.x()) < abs(a.y())) && (abs(a.x()) < abs(a.z())))
-        {
-            t = vector(1, 0, 0);
-            t = t - (t & a) * a;
-        }
-        else if (abs(a.y()) < abs(a.z()))
-        {
-            t = vector(0, 1, 0);
-            t = t - (t & a) * a;
-        }
-        else
-        {
-            t = vector(0, 0, 1);
-            t = t - (t & a) * a;
-        }
-
-        if (mag(t) < SMALL)
-        {
-            FatalErrorInFunction
-                << "axis1, axis2 appear to be co-linear: "
-                << a << ", " << t << endl
-                << abort(FatalError);
-        }
-
-        const vector b = t / mag(t);
-        const vector c = a ^ b;
-        LocalFrameSurf_[facei] = tensor(a, b, c);
+        LocalFrameSurf_[facei] = GramSchmidtProcess(nf[facei]);
     }
     // Boundary faces
     forAll(LocalFrameSurf_.boundaryField(), patchi)
@@ -199,37 +171,41 @@ void Foam::fvDVM::SetLocalFrame()
         // const labelUList &pOwner = mesh_.boundary()[patchi].faceCells();
         forAll(LocalFrameSurfPatch, pFacei)
         {
-            const vector a = nfPatch[pFacei];
-            vector t;
-            if ((abs(a.x()) < abs(a.y())) && (abs(a.x()) < abs(a.z())))
-            {
-                t = vector(1, 0, 0);
-                t = t - (t & a) * a;
-            }
-            else if (abs(a.y()) < abs(a.z()))
-            {
-                t = vector(0, 1, 0);
-                t = t - (t & a) * a;
-            }
-            else
-            {
-                t = vector(0, 0, 1);
-                t = t - (t & a) * a;
-            }
-
-            if (mag(t) < SMALL)
-            {
-                FatalErrorInFunction
-                    << "axis1, axis2 appear to be co-linear: "
-                    << a << ", " << t << endl
-                    << abort(FatalError);
-            }
-
-            const vector b = t / mag(t);
-            const vector c = a ^ b;
-            LocalFrameSurfPatch[pFacei] = tensor(a, b, c);
+            LocalFrameSurfPatch[pFacei] = GramSchmidtProcess(nfPatch[pFacei]);
         }
     }
+}
+
+tensor Foam::fvDVM::GramSchmidtProcess(const vector a)
+{
+    vector t;
+    if ((std::abs(a.x()) < std::abs(a.y())) && (std::abs(a.x()) < std::abs(a.z())))
+    {
+        t = vector(1, 0, 0);
+        t = t - (t & a) * a;
+    }
+    else if (std::abs(a.y()) < std::abs(a.z()))
+    {
+        t = vector(0, 1, 0);
+        t = t - (t & a) * a;
+    }
+    else
+    {
+        t = vector(0, 0, 1);
+        t = t - (t & a) * a;
+    }
+
+    if (mag(t) < SMALL)
+    {
+        FatalErrorInFunction
+            << "axis1, axis2 appear to be co-linear: "
+            << a << ", " << t << endl
+            << abort(FatalError);
+    }
+
+    const vector b = t / mag(t);
+    const vector c = a ^ b;
+    return tensor(a, b, c);
 }
 
 void Foam::fvDVM::Reconstruction()

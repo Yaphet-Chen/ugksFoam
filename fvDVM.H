@@ -133,6 +133,7 @@ class fvDVM
 
     // Set up local coordinate
     void SetLocalFrame();
+    tensor GramSchmidtProcess(const vector a);
 
     // Reconstruct the gradient of initial distribution function
     void Reconstruction();
