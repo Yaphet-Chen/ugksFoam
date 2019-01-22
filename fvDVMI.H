@@ -60,6 +60,11 @@ inline const Foam::volVectorField& Foam::fvDVM::qVol() const
     return qVol_;
 }
 
+inline const Foam::volVectorField& Foam::fvDVM::VolPro() const
+{
+    return VolPro_;
+}
+
 inline const Foam::surfaceTensorField& Foam::fvDVM::LocalFrameSurf() const
 {
     return LocalFrameSurf_;
@@ -104,4 +109,9 @@ inline Foam::scalar Foam::fvDVM::Pr() const
 inline Foam::label Foam::fvDVM::KInner() const
 {
     return KInner_;
+}
+
+inline Foam::scalar Foam::fvDVM::Gamma() const
+{
+    return Gamma_;
 }

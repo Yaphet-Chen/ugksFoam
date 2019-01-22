@@ -103,6 +103,9 @@ class fvDVM
     //- Gas molecular innter degree of freedom
     const label KInner_;
 
+    //- Ratio of specific heat
+    const scalar Gamma_;
+
     //- List of pointers to discrete velocities
     PtrList<DiscreteVelocityPoint> DV_;
 
@@ -118,8 +121,8 @@ class fvDVM
     //- volume heat flux vector
     volVectorField qVol_;
 
-    //- surface velocity, used for getCoNum
-    surfaceVectorField Usurf_;
+    //- Projections of the control volume on the y-z, x-z, x-y plane
+    volVectorField VolPro_;
 
     //- Local coordinate at each face
     surfaceTensorField LocalFrameSurf_;
@@ -134,6 +137,9 @@ class fvDVM
     // Set up local coordinate
     void SetLocalFrame();
     tensor GramSchmidtProcess(const vector a);
+
+    // Set up the projections of the control volume on the y-z, x-z, x-y plane
+    void SetVolPro();
 
     // Reconstruct the gradient of initial distribution function
     void Reconstruction();
@@ -184,6 +190,8 @@ class fvDVM
         const vector &U,
         const scalar &lambda,
         const vector &xi);
+
+    tmp<scalarField> getSoundSpeed();
 
     //- Disallow default bitwise copy construct
     fvDVM(const fvDVM &);
@@ -240,6 +248,9 @@ class fvDVM
     //- Heat flux field at cell center
     inline const volVectorField &qVol() const;
 
+    //- Projections of the control volume on the y-z, x-z, x-y plane
+    inline const volVectorField &VolPro() const;
+
     //- Local coordinate system at face center
     inline const surfaceTensorField &LocalFrameSurf() const;
 
@@ -260,6 +271,8 @@ class fvDVM
     inline scalar Pr() const;
 
     inline label KInner() const;
+
+    inline scalar Gamma() const;
 };
 
 // * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * * //

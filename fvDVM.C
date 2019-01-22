@@ -176,6 +176,33 @@ void Foam::fvDVM::SetLocalFrame()
     }
 }
 
+void Foam::fvDVM::SetVolPro()
+{
+    const surfaceVectorField &ssf = mesh_.Sf();
+    const labelUList &owner = mesh_.owner();
+    const labelUList &neighbour = mesh_.neighbour();
+
+    forAll(owner, facei)
+    {
+        VolPro_[owner[facei]] += cmptMag(ssf[facei]);
+        VolPro_[neighbour[facei]] += cmptMag(ssf[facei]);
+    }
+
+    forAll(mesh_.boundary(), patchi)
+    {
+        const labelUList &pFaceCells =
+            mesh_.boundary()[patchi].faceCells();
+
+        const fvsPatchField<vector> &pssf = ssf.boundaryField()[patchi];
+
+        forAll(mesh_.boundary()[patchi], facei)
+        {
+            VolPro_[pFaceCells[facei]] += cmptMag(pssf[facei]);
+        }
+    }
+    VolPro_ = VolPro_ * 0.5;
+}
+
 tensor Foam::fvDVM::GramSchmidtProcess(const vector a)
 {
     vector t;
@@ -322,7 +349,6 @@ void Foam::fvDVM::CalcFluxSurf()
         ConservedToPrim(rho, rhoU, rhoE, rho, U, lambda);
         // Info << rho << tab << rhoU << tab << rhoE << endl;
         // Info << rho << tab << U << tab << lambda << endl;
-        // Usurf_[facei] = frame.T() & U; // Used for coNum evaluation
         MicroSlope(Nrho, NrhoU, NrhoE, rho, U, lambda, aRho, aU, aLambda);
         MicroSlope(T1rho, T1rhoU, T1rhoE, rho, U, lambda, bRho, bU, bLambda);
         MicroSlope(T2rho, T2rhoU, T2rhoE, rho, U, lambda, cRho, cU, cLambda);
@@ -421,7 +447,6 @@ void Foam::fvDVM::CalcFluxSurf()
 
             forAll(pOwner, pFacei)
             {
-                Usurf_.boundaryFieldRef()[patchi][pFacei] = Upatch[pFacei];
                 // Local geometric information
                 const label own = pOwner[pFacei];
                 tensor frame = FramePatch[pFacei];
@@ -788,6 +813,7 @@ Foam::fvDVM::fvDVM(
       muRef_(readScalar(DVMProperties.subDict("gasProperties").lookup("muRef"))),
       Pr_(readScalar(DVMProperties.subDict("gasProperties").lookup("Pr"))),
       KInner_(DVMProperties.subDict("gasProperties").lookupOrDefault<label>("KInner", 0)),
+      Gamma_(scalar(KInner_ + 2 + mesh_.nSolutionD()) / scalar(KInner_ + mesh_.nSolutionD())),
       DV_(0),
       rhoFluxSurf_(
           IOobject(
@@ -825,15 +851,15 @@ Foam::fvDVM::fvDVM(
               IOobject::AUTO_WRITE),
           mesh_,
           dimensionedVector("0", dimless, vector(0, 0, 0))),
-      Usurf_(
+      VolPro_(
           IOobject(
-              "Usurf",
+              "VolPro",
               mesh_.time().timeName(),
               mesh_,
               IOobject::NO_READ,
               IOobject::NO_WRITE),
           mesh_,
-          dimensionedVector("0", U.dimensions(), vector(0, 0, 0))),
+          dimensionedVector("0", dimless, vector(0, 0, 0))),
       LocalFrameSurf_(
           IOobject(
               "LocalFrameSurf",
@@ -847,8 +873,8 @@ Foam::fvDVM::fvDVM(
     scalarList weights = DVMProperties.lookup("weights");
     scalarList Xis = DVMProperties.lookup("Xis");
     initialiseDV(weights, Xis);
-    Usurf_ = fvc::interpolate(Uvol_, "linear"); // for first time Dt calculation.
     SetLocalFrame();
+    SetVolPro();
 }
 
 // * * * * * * * * * * * * * * * * Destructor  * * * * * * * * * * * * * * * //
@@ -862,11 +888,16 @@ Foam::fvDVM::~fvDVM()
 void Foam::fvDVM::getCoNum(scalar &maxCoNum, scalar &meanCoNum)
 {
     scalar dt = time_.deltaTValue();
-    Usurf_ = fvc::interpolate(Uvol_, "linear");
-    scalarField UbyDx =
-        mesh_.deltaCoeffs() * (mag(Usurf_) + sqrt(scalar(mesh_.nSolutionD())) * xiMax_);
-    maxCoNum = gMax(UbyDx) * dt;
-    meanCoNum = gSum(UbyDx) / UbyDx.size() * dt;
+    scalarField UbyDxMicro = mesh_.deltaCoeffs() * sqrt(scalar(mesh_.nSolutionD())) * xiMax();
+    scalarField UbyDxMacro(((cmptMag(Uvol()) + getSoundSpeed() * vector(1.0, 1.0, 1.0)) & VolPro()) / mesh_.V());
+    maxCoNum = max(gMax(UbyDxMacro), gMax(UbyDxMicro)) * dt;
+    meanCoNum = max(gSum(UbyDxMacro), gSum(UbyDxMicro)) / UbyDxMacro.size() * dt;
+}
+
+tmp<scalarField> Foam::fvDVM::getSoundSpeed()
+{
+    tmp<scalarField> tvf(sqrt(0.5 * Gamma() / lambdaVol()));
+    return tvf;
 }
 
 void Foam::fvDVM::evolution()
