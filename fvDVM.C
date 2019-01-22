@@ -284,7 +284,7 @@ void Foam::fvDVM::CalcFluxSurf()
 
         // Moment
         scalarField Mu(7), MuL(7), MuR(7), Mv1(6), Mv2(6), Mxi(3);
-        scalarField Mau0(5), Mau(5), Mbv1(5), Mcv2(5), MauT(5), Mt(5);
+        scalarField M0u(5), Mau(5), Mbv1(5), Mcv2(5), MaTu(5), Mt(5);
 
         // Initilization
         rho = 0.0;
@@ -347,8 +347,6 @@ void Foam::fvDVM::CalcFluxSurf()
             T2rhoE += 0.5 * weight * (magSqr(xii) * dhi.z() + dbi.z());
         }
         ConservedToPrim(rho, rhoU, rhoE, rho, U, lambda);
-        // Info << rho << tab << rhoU << tab << rhoE << endl;
-        // Info << rho << tab << U << tab << lambda << endl;
         MicroSlope(Nrho, NrhoU, NrhoE, rho, U, lambda, aRho, aU, aLambda);
         MicroSlope(T1rho, T1rhoU, T1rhoE, rho, U, lambda, bRho, bU, bLambda);
         MicroSlope(T2rho, T2rhoU, T2rhoE, rho, U, lambda, cRho, cU, cLambda);
@@ -371,17 +369,17 @@ void Foam::fvDVM::CalcFluxSurf()
         Mt[1] = -tau * Mt[0] + Mt[4];
         Mt[2] = 0.5 * dt * dt - tau * Mt[0];
 
-        Mau0 = Moment_uv1v2xi(Mu, Mv1, Mv2, Mxi, 1, 0, 0, 0);
+        M0u = Moment_uv1v2xi(Mu, Mv1, Mv2, Mxi, 1, 0, 0, 0);
         Mau = Moment_auv1v2xi(aRho, aU, aLambda, Mu, Mv1, Mv2, Mxi, 2, 0, 0);
         Mbv1 = Moment_auv1v2xi(bRho, bU, bLambda, Mu, Mv1, Mv2, Mxi, 1, 1, 0);
         Mcv2 = Moment_auv1v2xi(cRho, cU, cLambda, Mu, Mv1, Mv2, Mxi, 1, 0, 1);
-        MauT = Moment_auv1v2xi(aTrho, aTU, aTlambda, Mu, Mv1, Mv2, Mxi, 1, 0, 0);
+        MaTu = Moment_auv1v2xi(aTrho, aTU, aTlambda, Mu, Mv1, Mv2, Mxi, 1, 0, 0);
 
-        rhoFluxSurf_[facei] = rho * (Mt[0] * Mau0[0] + Mt[1] * (Mau[0] + Mbv1[0] + Mcv2[0]) + Mt[2] * MauT[0]);
-        rhoUfluxSurf_[facei].x() = rho * (Mt[0] * Mau0[1] + Mt[1] * (Mau[1] + Mbv1[1] + Mcv2[1]) + Mt[2] * MauT[1]);
-        rhoUfluxSurf_[facei].y() = rho * (Mt[0] * Mau0[2] + Mt[1] * (Mau[2] + Mbv1[2] + Mcv2[2]) + Mt[2] * MauT[2]);
-        rhoUfluxSurf_[facei].z() = rho * (Mt[0] * Mau0[3] + Mt[1] * (Mau[3] + Mbv1[3] + Mcv2[3]) + Mt[2] * MauT[3]);
-        rhoEfluxSurf_[facei] = rho * (Mt[0] * Mau0[4] + Mt[1] * (Mau[4] + Mbv1[4] + Mcv2[4]) + Mt[2] * MauT[4]);
+        rhoFluxSurf_[facei] = rho * (Mt[0] * M0u[0] + Mt[1] * (Mau[0] + Mbv1[0] + Mcv2[0]) + Mt[2] * MaTu[0]);
+        rhoUfluxSurf_[facei].x() = rho * (Mt[0] * M0u[1] + Mt[1] * (Mau[1] + Mbv1[1] + Mcv2[1]) + Mt[2] * MaTu[1]);
+        rhoUfluxSurf_[facei].y() = rho * (Mt[0] * M0u[2] + Mt[1] * (Mau[2] + Mbv1[2] + Mcv2[2]) + Mt[2] * MaTu[2]);
+        rhoUfluxSurf_[facei].z() = rho * (Mt[0] * M0u[3] + Mt[1] * (Mau[3] + Mbv1[3] + Mcv2[3]) + Mt[2] * MaTu[3]);
+        rhoEfluxSurf_[facei] = rho * (Mt[0] * M0u[4] + Mt[1] * (Mau[4] + Mbv1[4] + Mcv2[4]) + Mt[2] * MaTu[4]);
 
         vector qf = vector(0, 0, 0);
         forAll(DV_, dvi)
@@ -903,7 +901,7 @@ tmp<scalarField> Foam::fvDVM::getSoundSpeed()
 void Foam::fvDVM::evolution()
 {
     // Info << "Begin evolution" << endl;
-    Reconstruction();
+    // Reconstruction();
     // Info << "Done reconstruction of nonequilibrium distribution" << endl;
     CalcFluxSurf();
     // Info << "Done Calculation of macro and micro flux" << endl;

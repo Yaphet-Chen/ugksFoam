@@ -77,6 +77,7 @@ int main(int argc, char *argv[])
             lambdaOld = lambda;
             rhoOld = rho;
             Uold = U;
+            T = 1.0 / lambda;
         }
     }
 

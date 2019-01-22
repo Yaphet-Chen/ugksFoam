@@ -135,7 +135,7 @@ void Foam::DiscreteVelocityPoint::setBCtype()
 
     // Bondary condition type map from rho BC to h/bVol_ BC
     std::map<word, word> bcMap;
-    bcMap["fixedValue"] = "mixed"; // For supersonic out boundary only
+    bcMap["fixedValue"] = "fixedValue";
     bcMap["zeroGradient"] = "zeroGradient";
     bcMap["calculated"] = "calculated"; // Maxwell wall
 
@@ -165,7 +165,7 @@ void Foam::DiscreteVelocityPoint::initBoundaryField()
 
     forAll(hBCs, patchi)
     {
-        if (hBCs[patchi].type() == "mixed")
+        if (hBCs[patchi].type() == "fixedValue")
         {
             DiscreteMaxwell(
                 hBCs[patchi],
@@ -179,12 +179,34 @@ void Foam::DiscreteVelocityPoint::initBoundaryField()
 
 void Foam::DiscreteVelocityPoint::Reconstruction()
 {
-    hVol_.boundaryFieldRef() = hVol_.boundaryFieldRef().boundaryInternalField();
-    bVol_.boundaryFieldRef() = bVol_.boundaryFieldRef().boundaryInternalField();
+    const volVectorField &C = mesh_.C();
+    // Boundary faces
+    forAll(hVol_.boundaryField(), patchi)
+    {
+        word type = hVol_.boundaryField()[patchi].type();
+        fvPatchField<scalar> &hVolPatch = hVol_.boundaryFieldRef()[patchi];
+        fvPatchField<scalar> &bVolPatch = bVol_.boundaryFieldRef()[patchi];
+        const fvsPatchField<vector> &CfPatch = mesh_.Cf().boundaryField()[patchi];
+        const labelUList &pOwner = mesh_.boundary()[patchi].faceCells();
+
+        if (type == "zeroGradient")
+        {
+            hVolPatch = hVolPatch.patchInternalField();
+            bVolPatch = bVolPatch.patchInternalField();
+        }
+        else if (type == "calculated")
+        {
+            forAll(hVolPatch, pfacei)
+            {
+                hVolPatch[pfacei] = hVol_[pOwner[pfacei]] + (hGradVol_[pOwner[pfacei]] & (CfPatch[pfacei] - C[pOwner[pfacei]]));
+                bVolPatch[pfacei] = bVol_[pOwner[pfacei]] + (bGradVol_[pOwner[pfacei]] & (CfPatch[pfacei] - C[pOwner[pfacei]]));
+            }
+        }
+    }
     hGradVol_ = fvc::grad(hVol_);
     bGradVol_ = fvc::grad(bVol_);
-    // hGradVol_.correctBoundaryConditions();
-    // bGradVol_.correctBoundaryConditions();
+    hGradVol_.correctBoundaryConditions();
+    bGradVol_.correctBoundaryConditions();
 }
 
 void Foam::DiscreteVelocityPoint::Update(scalar h, scalar b, label celli)
