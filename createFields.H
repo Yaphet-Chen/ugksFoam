@@ -73,7 +73,7 @@ volScalarField lambdaOld(
 
 volScalarField T(
     IOobject(
-        "Temperature",
+        "T",
         runTime.timeName(),
         mesh,
         IOobject::NO_READ,

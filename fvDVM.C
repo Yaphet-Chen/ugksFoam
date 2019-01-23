@@ -258,7 +258,6 @@ void Foam::fvDVM::CalcFluxSurf()
     const surfaceTensorField &localFrame = LocalFrameSurf();
     const scalar dt = time_.deltaTValue();
 
-    // Info << "internal" << endl;
     // Internal faces first
     forAll(owner, facei)
     {
@@ -417,7 +416,6 @@ void Foam::fvDVM::CalcFluxSurf()
         rhoEfluxSurf_[facei] = rhoEfluxSurf_[facei] * magSf[facei];
     }
 
-    // Info << "boundary" << endl;
     // boundary faces
     forAll(rhoVol_.boundaryField(), patchi)
     {
@@ -507,6 +505,14 @@ void Foam::fvDVM::CalcFluxSurf()
                 rhoUfluxPatch[pFacei] = dt * (frame.T() & rhoUfluxPatch[pFacei]) * magSfPatch[pFacei];
                 rhoEfluxPatch[pFacei] = dt * rhoEfluxPatch[pFacei] * magSfPatch[pFacei];
             }
+        }
+        else if (type == "fixedValue")
+        {
+
+        }
+        else if (type == "zeroGradient")
+        {
+            
         }
     }
 }
@@ -632,31 +638,28 @@ void Foam::fvDVM::Update()
 void Foam::fvDVM::PrimToConserved(scalar &rhoP, vector &U, scalar &lambda, scalar &rho, vector &rhoU, scalar &rhoE)
 {
     const label &K = KInner_;
-    const label &D = mesh_.nSolutionD();
     rho = rhoP;
     rhoU = rho * U;
-    rhoE = 0.5 * rho * (magSqr(U) + (K + D) / (2.0 * lambda));
+    rhoE = 0.5 * rho * (magSqr(U) + (K + 3) / (2.0 * lambda));
 }
 
 void Foam::fvDVM::ConservedToPrim(scalar &rhoC, vector &rhoU, scalar &rhoE, scalar &rho, vector &U, scalar &lambda)
 {
     const label &K = KInner_;
-    const label &D = mesh_.nSolutionD();
     rho = rhoC;
     U = rhoU / rho;
-    lambda = rho * (K + D) / (4.0 * (rhoE - 0.5 * (rhoU & U)));
+    lambda = rho * (K + 3) / (4.0 * (rhoE - 0.5 * (rhoU & U)));
 }
 
 void Foam::fvDVM::MicroSlope(scalar &srho, vector &srhoU, scalar &srhoE, scalar &rho, vector &U, scalar &lambda, scalar &grho, vector &gU, scalar &glambda)
 {
     const label &K = KInner_;
-    const label &D = mesh_.nSolutionD();
     const vector dU = (srhoU - U * srho) / rho;
-    const scalar dE = (srhoE - 0.5 * (magSqr(U) + (K + D) / (2.0 * lambda)) * srho) / rho;
+    const scalar dE = (srhoE - 0.5 * (magSqr(U) + (K + 3) / (2.0 * lambda)) * srho) / rho;
 
-    glambda = 4.0 * lambda * lambda / (K + D) * (2.0 * dE - 2.0 * (U & dU));
+    glambda = 4.0 * lambda * lambda / (K + 3) * (2.0 * dE - 2.0 * (U & dU));
     gU = 2.0 * lambda * dU - U * glambda;
-    grho = srho / rho - (U & gU) - 0.5 * (magSqr(U) + (K + D) / (2.0 * lambda)) * glambda;
+    grho = srho / rho - (U & gU) - 0.5 * (magSqr(U) + (K + 3) / (2.0 * lambda)) * glambda;
 }
 
 void Foam::fvDVM::CalcMoment(const scalar &rho, const vector &U, const scalar &lambda,
@@ -811,7 +814,7 @@ Foam::fvDVM::fvDVM(
       muRef_(readScalar(DVMProperties.subDict("gasProperties").lookup("muRef"))),
       Pr_(readScalar(DVMProperties.subDict("gasProperties").lookup("Pr"))),
       KInner_(DVMProperties.subDict("gasProperties").lookupOrDefault<label>("KInner", 0)),
-      Gamma_(scalar(KInner_ + 2 + mesh_.nSolutionD()) / scalar(KInner_ + mesh_.nSolutionD())),
+      Gamma_(scalar(KInner_ + 5) / scalar(KInner_ + 3)),
       DV_(0),
       rhoFluxSurf_(
           IOobject(
@@ -900,13 +903,9 @@ tmp<scalarField> Foam::fvDVM::getSoundSpeed()
 
 void Foam::fvDVM::evolution()
 {
-    // Info << "Begin evolution" << endl;
-    // Reconstruction();
-    // Info << "Done reconstruction of nonequilibrium distribution" << endl;
+    Reconstruction();
     CalcFluxSurf();
-    // Info << "Done Calculation of macro and micro flux" << endl;
     Update();
-    // Info << "Done update macro and micro variables" << endl;
 }
 
 // ************************************************************************* //
