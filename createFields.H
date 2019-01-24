@@ -87,7 +87,7 @@ lambdaOld = lambda;
 T = 1.0 / lambda;
 
 const bool adjustTimeStep =
-    runTime.controlDict().lookupOrDefault("adjustTimeStep", false);
+    runTime.controlDict().lookupOrDefault("adjustTimeStep", true);
 
 scalar maxCo =
     runTime.controlDict().lookupOrDefault<scalar>("maxCo", 1.0);

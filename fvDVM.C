@@ -448,33 +448,44 @@ void Foam::fvDVM::CalcFluxSurf()
                 tensor frame = FramePatch[pFacei];
 
                 // Face variable
-                scalarField h(nXi()), b(nXi());
+                scalarField h(nXi(), 0.0), b(nXi(), 0.0);
+                vectorField dh(nXi(), vector(0, 0, 0)), db(nXi(), vector(0, 0, 0)); // Micro gradient in local frame
+                scalarField H_g(nXi(), 0.0), B_g(nXi(), 0.0);
                 vectorField ui(nXi());
-                scalar rho, incidence = 0.0, reflection = 0.0;
-                vector U = frame & Upatch[pFacei]; // Macro velocity in local frame
-                scalar lambda = lambdaPatch[pFacei];
+
+                scalar rho_w, incidence = 0.0, reflection = 0.0;
+                vector U_w = frame & Upatch[pFacei]; // Macro velocity in local frame
+                scalar lambda_w = lambdaPatch[pFacei];
+                scalar rho_g = rhoVol()[own] / lambdaVol()[own] * lambda_w;
+
+                scalar tau = GetTau(rho_g, lambda_w);
+                scalar T3 = tau * (1.0 - exp(-dt / tau));
+                scalar T4 = -tau * dt * exp(-dt / tau) + tau * T3;
+                scalar T0 = dt - T3;
 
                 forAll(DV_, dvi)
                 {
                     DiscreteVelocityPoint &dv = DV_[dvi];
-                    const vector xii = frame & dv.xi(); // Micro velocity in local frame
-                    ui[dvi] = xii;
                     const scalar &weight = dv.weight();
+                    const vector xii = frame & dv.xi(); // Micro velocity in local frame
                     const scalar &vn = xii.x();
-
-                    h[dvi] = dv.hVol()[own] + (dv.hGradVol()[own] & (CfPatch[pFacei] - C[own]));
-                    b[dvi] = dv.bVol()[own] + (dv.bGradVol()[own] & (CfPatch[pFacei] - C[own]));
+                    ui[dvi] = xii;
 
                     if (vn >= VSMALL) // Comming from own
                     {
-                        incidence += weight * vn * h[dvi];
+                        h[dvi] = dv.hVol()[own] + (dv.hGradVol()[own] & (CfPatch[pFacei] - C[own]));
+                        b[dvi] = dv.bVol()[own] + (dv.bGradVol()[own] & (CfPatch[pFacei] - C[own]));
+                        dh[dvi] = frame & dv.hGradVol()[own];
+                        db[dvi] = frame & dv.bGradVol()[own];
+                        DiscreteMaxwell(H_g[dvi], B_g[dvi], rho_g, U_w, lambda_w, xii);
+                        incidence += weight * vn * (T0 * H_g[dvi] + T3 * h[dvi] - T4 * (xii & dh[dvi]));
                     }
                     else // Comming form nei
                     {
-                        reflection += pow(sqrt(lambda / pi), D) * weight * vn * exp(-lambda * magSqr(U - xii));
+                        reflection += dt * weight * vn * pow(sqrt(lambda_w / pi), D) * exp(-lambda_w * magSqr(U_w - xii));
                     }
                 }
-                rho = -incidence / reflection;
+                rho_w = -incidence / reflection;
 
                 forAll(DV_, dvi)
                 {
@@ -482,37 +493,37 @@ void Foam::fvDVM::CalcFluxSurf()
                     const scalar &weight = dv.weight();
                     const vector &xii = ui[dvi];
                     const scalar &vn = xii.x();
-                    scalar hi;
-                    scalar bi;
 
                     if (vn >= VSMALL) // Comming from own
                     {
-                        hi = h[dvi];
-                        bi = b[dvi];
+                        rhoFluxPatch[pFacei] += weight * vn * (T0 * H_g[dvi] + T3 * h[dvi] - T4 * (xii & dh[dvi]));
+                        rhoUfluxPatch[pFacei] += weight * vn * xii * (T0 * H_g[dvi] + T3 * h[dvi] - T4 * (xii & dh[dvi]));
+                        rhoEfluxPatch[pFacei] += 0.5 * weight * vn * (T0 * (magSqr(xii) * H_g[dvi] + B_g[dvi]) + T3 * (magSqr(xii) * h[dvi] + b[dvi]) - T4 * (magSqr(xii) * (xii & dh[dvi]) + (xii & db[dvi])));
+                        dv.UpdatehFlux().boundaryFieldRef()[patchi][pFacei] = vn * (T0 * H_g[dvi] + T3 * h[dvi] - T4 * (xii & dh[dvi])) * magSfPatch[pFacei];
+                        dv.UpdatebFlux().boundaryFieldRef()[patchi][pFacei] = vn * (T0 * B_g[dvi] + T3 * b[dvi] - T4 * (xii & db[dvi])) * magSfPatch[pFacei];
                     }
                     else // Comming form nei
                     {
-                        DiscreteMaxwell(hi, bi, rho, U, lambda, xii);
+                        scalar H_w, B_w;
+                        DiscreteMaxwell(H_w, B_w, rho_w, U_w, lambda_w, xii);
+                        scalar temp = dt * weight * vn;
+                        rhoFluxPatch[pFacei] += temp * H_w;
+                        rhoUfluxPatch[pFacei] += temp * xii * H_w;
+                        rhoEfluxPatch[pFacei] += temp * 0.5 * (magSqr(xii) * H_w + B_w);
+                        dv.UpdatehFlux().boundaryFieldRef()[patchi][pFacei] = dt * vn * H_w * magSfPatch[pFacei];
+                        dv.UpdatebFlux().boundaryFieldRef()[patchi][pFacei] = dt * vn * B_w * magSfPatch[pFacei];
                     }
-                    rhoFluxPatch[pFacei] += weight * vn * hi;
-                    rhoUfluxPatch[pFacei] += weight * vn * xii * hi;
-                    rhoEfluxPatch[pFacei] += 0.5 * weight * vn * (magSqr(xii) * hi + bi);
-
-                    dv.UpdatehFlux().boundaryFieldRef()[patchi][pFacei] = dt * vn * hi * magSfPatch[pFacei];
-                    dv.UpdatebFlux().boundaryFieldRef()[patchi][pFacei] = dt * vn * bi * magSfPatch[pFacei];
                 }
-                rhoFluxPatch[pFacei] = dt * rhoFluxPatch[pFacei] * magSfPatch[pFacei];
-                rhoUfluxPatch[pFacei] = dt * (frame.T() & rhoUfluxPatch[pFacei]) * magSfPatch[pFacei];
-                rhoEfluxPatch[pFacei] = dt * rhoEfluxPatch[pFacei] * magSfPatch[pFacei];
+                rhoFluxPatch[pFacei] = rhoFluxPatch[pFacei] * magSfPatch[pFacei];
+                rhoUfluxPatch[pFacei] = (frame.T() & rhoUfluxPatch[pFacei]) * magSfPatch[pFacei];
+                rhoEfluxPatch[pFacei] = rhoEfluxPatch[pFacei] * magSfPatch[pFacei];
             }
         }
         else if (type == "fixedValue")
         {
-
         }
         else if (type == "zeroGradient")
         {
-            
         }
     }
 }
