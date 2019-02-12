@@ -161,14 +161,16 @@ class fvDVM
 
     void PrimToConserved(scalar &rhoP, vector &U, scalar &lambda, scalar &rho, vector &rhoU, scalar &rhoE);
     void ConservedToPrim(scalar &rhoC, vector &rhoU, scalar &rhoE, scalar &rho, vector &U, scalar &lambda);
+    scalarField ConservedToPrim(scalar rhoC, vector rhoU, scalar rhoE);
+    scalarField VariablesToField(scalar head, vector V, scalar tail);
+    void FieldToVariables(scalarField s, scalar &head, vector &V, scalar &tail);
     void MicroSlope(scalar &srho, vector &srhoU, scalar &srhoE, scalar &rho, vector &U, scalar &lambda, scalar &grho, vector &gU, scalar &glambda);
-    void CalcMoment(const scalar &rho, const vector &U, const scalar &lambda,
-                    scalarField &Mu, scalarField &Mv1, scalarField &Mv2, scalarField &Mxi,
-                    scalarField &MuL, scalarField &MuR);
+    scalarField MicroSlope(scalarField &slope, scalarField &prim);
+    void CalcMoment(const scalarField &prim, scalarField &Mu, scalarField &Mv1, scalarField &Mv2,
+                    scalarField &Mxi, scalarField &MuL, scalarField &MuR);
     scalarField Moment_uv1v2xi(scalarField &Mu, scalarField &Mv1, scalarField &Mv2, scalarField &Mxi,
                                label alpha, label beta, label gamma, label delta);
-    scalarField Moment_auv1v2xi(scalar &srho, vector &sU, scalar &sLambda,
-                                scalarField &Mu, scalarField &Mv1, scalarField &Mv2, scalarField &Mxi,
+    scalarField Moment_auv1v2xi(scalarField &s, scalarField &Mu, scalarField &Mv1, scalarField &Mv2, scalarField &Mxi,
                                 label alpha, label beta, label gamma);
     scalar GetTau(const scalar &rho, const scalar &lambda);
 

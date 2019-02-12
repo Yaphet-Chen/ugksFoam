@@ -373,21 +373,28 @@ void Foam::fvDVM::CalcFluxSurf()
             T2rhoU += weight * xii * dhi.z();
             T2rhoE += 0.5 * weight * (magSqr(xii) * dhi.z() + dbi.z());
         }
-        ConservedToPrim(rho, rhoU, rhoE, rho, U, lambda);
-        MicroSlope(Nrho, NrhoU, NrhoE, rho, U, lambda, aRho, aU, aLambda);
-        MicroSlope(T1rho, T1rhoU, T1rhoE, rho, U, lambda, bRho, bU, bLambda);
-        MicroSlope(T2rho, T2rhoU, T2rhoE, rho, U, lambda, cRho, cU, cLambda);
 
-        CalcMoment(rho, U, lambda, Mu, Mv1, Mv2, Mxi, MuL, MuR);
-        Mau = Moment_auv1v2xi(aRho, aU, aLambda, Mu, Mv1, Mv2, Mxi, 1, 0, 0);
-        Mbv1 = Moment_auv1v2xi(bRho, bU, bLambda, Mu, Mv1, Mv2, Mxi, 0, 1, 0);
-        Mcv2 = Moment_auv1v2xi(cRho, cU, cLambda, Mu, Mv1, Mv2, Mxi, 0, 0, 1);
-        scalar swrho = -rho * (Mau[0] + Mbv1[0] + Mcv2[0]);
-        vector swrhoU = vector(-rho * (Mau[1] + Mbv1[1] + Mcv2[1]), -rho * (Mau[2] + Mbv1[2] + Mcv2[2]), -rho * (Mau[3] + Mbv1[3] + Mcv2[3]));
-        scalar swrhoE = -rho * (Mau[4] + Mbv1[4] + Mcv2[4]);
-        MicroSlope(swrho, swrhoU, swrhoE, rho, U, lambda, aTrho, aTU, aTlambda);
+        scalarField N = VariablesToField(Nrho, NrhoU, NrhoE);
+        scalarField T1 = VariablesToField(T1rho, T1rhoU, T1rhoE);
+        scalarField T2 = VariablesToField(T2rho, T2rhoU, T2rhoE);
+        scalarField prim = ConservedToPrim(rho, rhoU, rhoE);
+        scalarField aBar = MicroSlope(N, prim);
+        scalarField bBar = MicroSlope(T1, prim);
+        scalarField cBar = MicroSlope(T2, prim);
+        FieldToVariables(aBar, aRho, aU, aLambda);
+        FieldToVariables(bBar, bRho, bU, bLambda);
+        FieldToVariables(cBar, cRho, cU, cLambda);
+
+        CalcMoment(prim, Mu, Mv1, Mv2, Mxi, MuL, MuR);
+        Mau = Moment_auv1v2xi(aBar, Mu, Mv1, Mv2, Mxi, 1, 0, 0);
+        Mbv1 = Moment_auv1v2xi(bBar, Mu, Mv1, Mv2, Mxi, 0, 1, 0);
+        Mcv2 = Moment_auv1v2xi(cBar, Mu, Mv1, Mv2, Mxi, 0, 0, 1);
+        scalarField sw(-rho * (Mau + Mbv1 + Mcv2));
+        scalarField aT = MicroSlope(sw, prim);
+        FieldToVariables(aT, aTrho, aTU, aTlambda);
 
         // Calculate collision time and some time integration terms
+        FieldToVariables(prim, rho, U, lambda);
         scalar tau = GetTau(rho, lambda);
 
         Mt[3] = tau * (1.0 - exp(-dt / tau));
@@ -397,16 +404,13 @@ void Foam::fvDVM::CalcFluxSurf()
         Mt[2] = 0.5 * dt * dt - tau * Mt[0];
 
         M0u = Moment_uv1v2xi(Mu, Mv1, Mv2, Mxi, 1, 0, 0, 0);
-        Mau = Moment_auv1v2xi(aRho, aU, aLambda, Mu, Mv1, Mv2, Mxi, 2, 0, 0);
-        Mbv1 = Moment_auv1v2xi(bRho, bU, bLambda, Mu, Mv1, Mv2, Mxi, 1, 1, 0);
-        Mcv2 = Moment_auv1v2xi(cRho, cU, cLambda, Mu, Mv1, Mv2, Mxi, 1, 0, 1);
-        MaTu = Moment_auv1v2xi(aTrho, aTU, aTlambda, Mu, Mv1, Mv2, Mxi, 1, 0, 0);
+        Mau = Moment_auv1v2xi(aBar, Mu, Mv1, Mv2, Mxi, 2, 0, 0);
+        Mbv1 = Moment_auv1v2xi(bBar, Mu, Mv1, Mv2, Mxi, 1, 1, 0);
+        Mcv2 = Moment_auv1v2xi(cBar, Mu, Mv1, Mv2, Mxi, 1, 0, 1);
+        MaTu = Moment_auv1v2xi(aT, Mu, Mv1, Mv2, Mxi, 1, 0, 0);
 
-        rhoFluxSurf_[facei] = rho * (Mt[0] * M0u[0] + Mt[1] * (Mau[0] + Mbv1[0] + Mcv2[0]) + Mt[2] * MaTu[0]);
-        rhoUfluxSurf_[facei].x() = rho * (Mt[0] * M0u[1] + Mt[1] * (Mau[1] + Mbv1[1] + Mcv2[1]) + Mt[2] * MaTu[1]);
-        rhoUfluxSurf_[facei].y() = rho * (Mt[0] * M0u[2] + Mt[1] * (Mau[2] + Mbv1[2] + Mcv2[2]) + Mt[2] * MaTu[2]);
-        rhoUfluxSurf_[facei].z() = rho * (Mt[0] * M0u[3] + Mt[1] * (Mau[3] + Mbv1[3] + Mcv2[3]) + Mt[2] * MaTu[3]);
-        rhoEfluxSurf_[facei] = rho * (Mt[0] * M0u[4] + Mt[1] * (Mau[4] + Mbv1[4] + Mcv2[4]) + Mt[2] * MaTu[4]);
+        scalarField flux(rho * (Mt[0] * M0u + Mt[1] * (Mau + Mbv1 + Mcv2) + Mt[2] * MaTu));
+        FieldToVariables(flux, rhoFluxSurf_[facei], rhoUfluxSurf_[facei], rhoEfluxSurf_[facei]);
 
         vector qf = vector(0, 0, 0);
         forAll(DV_, dvi)
@@ -690,6 +694,34 @@ void Foam::fvDVM::ConservedToPrim(scalar &rhoC, vector &rhoU, scalar &rhoE, scal
     lambda = rho * (K + 3) / (4.0 * (rhoE - 0.5 * (rhoU & U)));
 }
 
+scalarField Foam::fvDVM::ConservedToPrim(scalar rhoC, vector rhoU, scalar rhoE)
+{
+    scalar rho, lambda;
+    vector U;
+    ConservedToPrim(rhoC, rhoU, rhoE, rho, U, lambda);
+    return VariablesToField(rho, U, lambda);
+}
+
+scalarField Foam::fvDVM::VariablesToField(scalar head, vector V, scalar tail)
+{
+    scalarField s(5);
+    s[0] = head;
+    s[1] = V.x();
+    s[2] = V.y();
+    s[3] = V.z();
+    s[4] = tail;
+    return s;
+}
+
+void Foam::fvDVM::FieldToVariables(scalarField s, scalar &head, vector &V, scalar &tail)
+{
+    head = s[0];
+    V.x() = s[1];
+    V.y() = s[2];
+    V.z() = s[3];
+    tail = s[4];
+}
+
 void Foam::fvDVM::MicroSlope(scalar &srho, vector &srhoU, scalar &srhoE, scalar &rho, vector &U, scalar &lambda, scalar &grho, vector &gU, scalar &glambda)
 {
     const label &K = KInner_;
@@ -701,13 +733,31 @@ void Foam::fvDVM::MicroSlope(scalar &srho, vector &srhoU, scalar &srhoE, scalar 
     grho = srho / rho - (U & gU) - 0.5 * (magSqr(U) + (K + 3) / (2.0 * lambda)) * glambda;
 }
 
-void Foam::fvDVM::CalcMoment(const scalar &rho, const vector &U, const scalar &lambda,
-                             scalarField &Mu, scalarField &Mv1, scalarField &Mv2, scalarField &Mxi,
-                             scalarField &MuL, scalarField &MuR)
+scalarField Foam::fvDVM::MicroSlope(scalarField &slope, scalarField &prim)
+{
+    scalar srho = slope[0];
+    vector srhoU(slope[1], slope[2], slope[3]);
+    scalar srhoE = slope[4];
+    scalar rho = prim[0];
+    vector U(prim[1], prim[2], prim[3]);
+    scalar lambda = prim[4];
+    scalar grho;
+    vector gU;
+    scalar glambda;
+    MicroSlope(srho, srhoU, srhoE, rho, U, lambda, grho, gU, glambda);
+    return VariablesToField(grho, gU, glambda);
+}
+
+void Foam::fvDVM::CalcMoment(const scalarField &prim, scalarField &Mu, scalarField &Mv1, scalarField &Mv2,
+                             scalarField &Mxi, scalarField &MuL, scalarField &MuR)
 {
     const label &K = KInner_;
     const label &D = mesh_.nSolutionD();
     label innerK = K + 3 - D;
+
+    scalar rho, lambda;
+    vector U;
+    FieldToVariables(prim, rho, U, lambda);
 
     // Moments of normal velocity
     MuL[0] = 0.5 * erfc(-sqrt(lambda) * U.x());
@@ -752,19 +802,19 @@ scalarField Foam::fvDVM::Moment_uv1v2xi(scalarField &Mu, scalarField &Mv1, scala
                         Mu[alpha] * Mv1[beta] * Mv2[gamma] * Mxi[(delta + 2) / 2]);
     return uv1v2xi;
 }
-scalarField Foam::fvDVM::Moment_auv1v2xi(scalar &srho, vector &sU, scalar &sLambda,
-                                         scalarField &Mu, scalarField &Mv1, scalarField &Mv2, scalarField &Mxi,
+
+scalarField Foam::fvDVM::Moment_auv1v2xi(scalarField &s, scalarField &Mu, scalarField &Mv1, scalarField &Mv2, scalarField &Mxi,
                                          label alpha, label beta, label gamma)
 {
     scalarField auv1v2xi(5);
-    auv1v2xi = srho * Moment_uv1v2xi(Mu, Mv1, Mv2, Mxi, alpha + 0, beta + 0, gamma + 0, 0) +
-               sU.x() * Moment_uv1v2xi(Mu, Mv1, Mv2, Mxi, alpha + 1, beta + 0, gamma + 0, 0) +
-               sU.y() * Moment_uv1v2xi(Mu, Mv1, Mv2, Mxi, alpha + 0, beta + 1, gamma + 0, 0) +
-               sU.z() * Moment_uv1v2xi(Mu, Mv1, Mv2, Mxi, alpha + 0, beta + 0, gamma + 1, 0) +
-               0.5 * sLambda * Moment_uv1v2xi(Mu, Mv1, Mv2, Mxi, alpha + 2, beta + 0, gamma + 0, 0) +
-               0.5 * sLambda * Moment_uv1v2xi(Mu, Mv1, Mv2, Mxi, alpha + 0, beta + 2, gamma + 0, 0) +
-               0.5 * sLambda * Moment_uv1v2xi(Mu, Mv1, Mv2, Mxi, alpha + 0, beta + 0, gamma + 2, 0) +
-               0.5 * sLambda * Moment_uv1v2xi(Mu, Mv1, Mv2, Mxi, alpha + 0, beta + 0, gamma + 0, 2);
+    auv1v2xi = s[0] * Moment_uv1v2xi(Mu, Mv1, Mv2, Mxi, alpha + 0, beta + 0, gamma + 0, 0) +
+               s[1] * Moment_uv1v2xi(Mu, Mv1, Mv2, Mxi, alpha + 1, beta + 0, gamma + 0, 0) +
+               s[2] * Moment_uv1v2xi(Mu, Mv1, Mv2, Mxi, alpha + 0, beta + 1, gamma + 0, 0) +
+               s[3] * Moment_uv1v2xi(Mu, Mv1, Mv2, Mxi, alpha + 0, beta + 0, gamma + 1, 0) +
+               0.5 * s[4] * Moment_uv1v2xi(Mu, Mv1, Mv2, Mxi, alpha + 2, beta + 0, gamma + 0, 0) +
+               0.5 * s[4] * Moment_uv1v2xi(Mu, Mv1, Mv2, Mxi, alpha + 0, beta + 2, gamma + 0, 0) +
+               0.5 * s[4] * Moment_uv1v2xi(Mu, Mv1, Mv2, Mxi, alpha + 0, beta + 0, gamma + 2, 0) +
+               0.5 * s[4] * Moment_uv1v2xi(Mu, Mv1, Mv2, Mxi, alpha + 0, beta + 0, gamma + 0, 2);
     return auv1v2xi;
 }
 
