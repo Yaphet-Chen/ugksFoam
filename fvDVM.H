@@ -109,16 +109,25 @@ class fvDVM
     //- List of pointers to discrete velocities
     PtrList<DiscreteVelocityPoint> DV_;
 
-    //- surface marco rho flux
+    //- Surface marco rho flux
     surfaceScalarField rhoFluxSurf_;
 
-    //- surface marco momentum flux
+    //- Surface marco momentum flux
     surfaceVectorField rhoUfluxSurf_;
 
-    //- surface marco energy flux
+    //- Surface marco energy flux
     surfaceScalarField rhoEfluxSurf_;
 
-    //- volume heat flux vector
+    //- Gradient of conserved variable rho
+    volVectorField rhoGradVol_;
+
+    //- Gradient of conserved variable momentum
+    volTensorField rhoUgradVol_;
+
+    //- Gradient of conserved variable energy
+    volVectorField rhoEgradVol_;
+
+    //- Volume heat flux vector
     volVectorField qVol_;
 
     //- Projections of the control volume on the y-z, x-z, x-y plane

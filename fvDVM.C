@@ -238,8 +238,37 @@ tensor Foam::fvDVM::GramSchmidtProcess(const vector a)
 void Foam::fvDVM::Reconstruction()
 {
     forAll(DV_, DVid)
-        DV_[DVid]
-            .Reconstruction();
+        DV_[DVid].Reconstruction();
+
+    const volVectorField &C = mesh_.C();
+    // Boundary faces
+    forAll(rhoVol_.boundaryField(), patchi)
+    {
+        word type = rhoVol_.boundaryField()[patchi].type();
+        fvPatchField<scalar> &rhoVolPatch = rhoVol_.boundaryFieldRef()[patchi];
+        fvPatchField<vector> &UvolPatch = Uvol_.boundaryFieldRef()[patchi];
+        fvPatchField<scalar> &lambdaVolPatch = lambdaVol_.boundaryFieldRef()[patchi];
+        const fvsPatchField<vector> &CfPatch = mesh_.Cf().boundaryField()[patchi];
+        const labelUList &pOwner = mesh_.boundary()[patchi].faceCells();
+
+        if (type == "zeroGradient")
+        {
+            rhoVolPatch = rhoVolPatch.patchInternalField();
+            UvolPatch = UvolPatch.patchInternalField();
+            lambdaVolPatch = lambdaVolPatch.patchInternalField();
+        }
+        else if (type == "calculated")
+        {
+            forAll(rhoVolPatch, pfacei)
+            {
+                scalar own = pOwner[pfacei];
+                rhoVolPatch[pfacei] = rhoVol_[own] + (rhoGradVol_[own] & (CfPatch[pfacei] - C[own]));
+            }
+        }
+    }
+    rhoGradVol_ = fvc::grad(rhoVol_);
+    rhoUgradVol_ = fvc::grad(rhoVol_ * Uvol_);
+    rhoEgradVol_ = fvc::grad(0.5 * rhoVol_ * (magSqr(Uvol_) + (KInner() + 3) / (2.0 * lambdaVol_)));
 }
 
 void Foam::fvDVM::CalcFluxSurf()
@@ -261,7 +290,6 @@ void Foam::fvDVM::CalcFluxSurf()
     // Internal faces first
     forAll(owner, facei)
     {
-        // Info << facei << endl;
         // Local geometric information
         label own = owner[facei];
         label nei = neighbour[facei];
@@ -854,6 +882,36 @@ Foam::fvDVM::fvDVM(
               IOobject::NO_WRITE),
           mesh_,
           dimensionedScalar("0", dimless, 0)),
+      rhoGradVol_(
+          IOobject(
+              "rhoGradVol",
+              mesh_.time().timeName(),
+              mesh_,
+              IOobject::NO_READ,
+              IOobject::NO_WRITE),
+          mesh_,
+          dimensionedVector("0", rhoVol_.dimensions() / dimLength, vector(0, 0, 0)),
+          "zeroGradient"),
+      rhoUgradVol_(
+          IOobject(
+              "rhoUgradVol",
+              mesh_.time().timeName(),
+              mesh_,
+              IOobject::NO_READ,
+              IOobject::NO_WRITE),
+          mesh_,
+          dimensionedTensor("0", rhoVol_.dimensions() * Uvol_.dimensions() / dimLength, Zero),
+          "zeroGradient"),
+      rhoEgradVol_(
+          IOobject(
+              "rhoEgradVol",
+              mesh_.time().timeName(),
+              mesh_,
+              IOobject::NO_READ,
+              IOobject::NO_WRITE),
+          mesh_,
+          dimensionedVector("0", rhoVol_.dimensions() * Uvol_.dimensions() * Uvol_.dimensions() / dimLength, vector(0, 0, 0)),
+          "zeroGradient"),
       qVol_(
           IOobject(
               "q",

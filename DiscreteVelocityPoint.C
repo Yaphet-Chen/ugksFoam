@@ -198,15 +198,16 @@ void Foam::DiscreteVelocityPoint::Reconstruction()
         {
             forAll(hVolPatch, pfacei)
             {
-                hVolPatch[pfacei] = hVol_[pOwner[pfacei]] + (hGradVol_[pOwner[pfacei]] & (CfPatch[pfacei] - C[pOwner[pfacei]]));
-                bVolPatch[pfacei] = bVol_[pOwner[pfacei]] + (bGradVol_[pOwner[pfacei]] & (CfPatch[pfacei] - C[pOwner[pfacei]]));
+                scalar own = pOwner[pfacei];
+                hVolPatch[pfacei] = hVol_[own] + (hGradVol_[own] & (CfPatch[pfacei] - C[own]));
+                bVolPatch[pfacei] = bVol_[own] + (bGradVol_[own] & (CfPatch[pfacei] - C[own]));
             }
         }
     }
     hGradVol_ = fvc::grad(hVol_);
     bGradVol_ = fvc::grad(bVol_);
-    hGradVol_.correctBoundaryConditions();
-    bGradVol_.correctBoundaryConditions();
+    // hGradVol_.correctBoundaryConditions();
+    // bGradVol_.correctBoundaryConditions();
 }
 
 void Foam::DiscreteVelocityPoint::Update(scalar h, scalar b, label celli)

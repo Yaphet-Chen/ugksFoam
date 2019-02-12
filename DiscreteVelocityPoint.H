@@ -85,7 +85,7 @@ private:
 
         volScalarField bVol_;
 
-        //- gradient of g/h bar B
+        //- gradient of g/h
         volVectorField hGradVol_;
 
         volVectorField bGradVol_;
