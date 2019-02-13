@@ -298,13 +298,10 @@ void Foam::fvDVM::CalcFluxSurf()
         // Face variable
         scalarField h(nXi()), b(nXi());
         vectorField dh(nXi()), db(nXi()), ui(nXi()); // Micro gradient and velocity in local frame
-        scalar rho, lambda, rhoE;
-        vector U, rhoU;
+        scalar lambda, rho, rhoL, rhoR, rhoE, rhoEL, rhoER;
+        vector U, rhoU, rhoUL, rhoUR;
 
         // Gradient and micro slope
-        scalar Nrho, T1rho, T2rho;    // Normal derivate of conserved variables
-        vector NrhoU, T1rhoU, T2rhoU; // First tangential derivate of conserved variables
-        scalar NrhoE, T1rhoE, T2rhoE; // Second tangetial derivate of conserved variables
         scalar aRho, bRho, cRho, aTrho;
         vector aU, bU, cU, aTU;
         scalar aLambda, bLambda, cLambda, aTlambda;
@@ -312,71 +309,54 @@ void Foam::fvDVM::CalcFluxSurf()
         // Moment
         scalarField Mu(7), MuL(7), MuR(7), Mv1(6), Mv2(6), Mxi(3);
         scalarField M0u(5), Mau(5), Mbv1(5), Mcv2(5), MaTu(5), Mt(5);
+        scalarField Mu_L(7), MuL_L(7), MuR_L(7), Mv1_L(6), Mv2_L(6), Mxi_L(3);
+        scalarField Mu_R(7), MuL_R(7), MuR_R(7), Mv1_R(6), Mv2_R(6), Mxi_R(3);
 
-        // Initilization
-        rho = 0.0;
-        U = rhoU = vector(0, 0, 0);
-        lambda = rhoE = 0.0;
-        Nrho = T1rho = T2rho = 0.0;
-        NrhoU = T1rhoU = T2rhoU = vector(0, 0, 0);
-        NrhoE = T1rhoE = T2rhoE = 0.0;
+        // Obtain the conserved variables in local frame by collision
+        PrimToConserved(rhoVol_[own], Uvol_[own], lambdaVol_[own], rhoL, rhoUL, rhoEL);
+        rhoL = rhoL + (rhoGradVol_[own] & (Cf[facei] - C[own]));
+        rhoUL = frame & (rhoUL + (rhoUgradVol_[own] & (Cf[facei] - C[own])));
+        rhoEL = rhoEL + (rhoEgradVol_[own] & (Cf[facei] - C[own]));
+        scalarField primL = ConservedToPrim(rhoL, rhoUL, rhoEL);
+        CalcMoment(primL, Mu_L, Mv1_L, Mv2_L, Mxi_L, MuL_L, MuR_L);
 
-        forAll(DV_, dvi)
-        {
-            DiscreteVelocityPoint &dv = DV_[dvi];
-            const vector xii = frame & dv.xi(); // Micro velocity in local frame
-            ui[dvi] = xii;
+        PrimToConserved(rhoVol_[nei], Uvol_[nei], lambdaVol_[nei], rhoR, rhoUR, rhoER);
+        rhoR = rhoR + (rhoGradVol_[nei] & (Cf[facei] - C[nei]));
+        rhoUR = frame & (rhoUR + (rhoUgradVol_[nei] & (Cf[facei] - C[nei])));
+        rhoER = rhoER + (rhoEgradVol_[nei] & (Cf[facei] - C[nei]));
+        scalarField primR = ConservedToPrim(rhoR, rhoUR, rhoER);
+        CalcMoment(primR, Mu_R, Mv1_R, Mv2_R, Mxi_R, MuL_R, MuR_R);
 
-            if (xii.x() >= VSMALL) // Comming from own
-            {
-                h[dvi] = dv.hVol()[own] + (dv.hGradVol()[own] & (Cf[facei] - C[own]));
-                b[dvi] = dv.bVol()[own] + (dv.bGradVol()[own] & (Cf[facei] - C[own]));
-                dh[dvi] = frame & dv.hGradVol()[own];
-                db[dvi] = frame & dv.bGradVol()[own];
-            }
-            else if (xii.x() < -VSMALL) // Comming form nei
-            {
-                h[dvi] = dv.hVol()[nei] + (dv.hGradVol()[nei] & (Cf[facei] - C[nei]));
-                b[dvi] = dv.bVol()[nei] + (dv.bGradVol()[nei] & (Cf[facei] - C[nei]));
-                dh[dvi] = frame & dv.hGradVol()[nei];
-                db[dvi] = frame & dv.bGradVol()[nei];
-            }
-            else
-            {
-                h[dvi] = 0.5 * (dv.hVol()[own] + (dv.hGradVol()[own] & (Cf[facei] - C[own])) + dv.hVol()[nei] + (dv.hGradVol()[nei] & (Cf[facei] - C[nei])));
-                b[dvi] = 0.5 * (dv.bVol()[own] + (dv.bGradVol()[own] & (Cf[facei] - C[own])) + dv.bVol()[nei] + (dv.bGradVol()[nei] & (Cf[facei] - C[nei])));
-                dh[dvi] = 0.5 * frame & (dv.hGradVol()[own] + dv.hGradVol()[nei]);
-                db[dvi] = 0.5 * frame & (dv.bGradVol()[own] + dv.bGradVol()[nei]);
-            }
-            // Calculate conVars at cell interface in local frame
-            const scalar &weight = dv.weight();
-            const scalar &hi = h[dvi];
-            const scalar &bi = b[dvi];
-            const vector &dhi = dh[dvi]; // Micro gradient dh already in local frame
-            const vector &dbi = db[dvi]; // Micro gradient db already in local frame
+        scalarField conVars(primL[0] * Moment_uv1v2xi(MuL_L, Mv1_L, Mv2_L, Mxi_L, 0, 0, 0, 0) +
+                            primR[0] * Moment_uv1v2xi(MuR_R, Mv1_R, Mv2_R, Mxi_R, 0, 0, 0, 0));
+        FieldToVariables(conVars, rho, rhoU, rhoE);
 
-            // Obtain the conserved variables in local frame by collision
-            rho += weight * hi;
-            rhoU += weight * xii * hi; // local frame
-            rhoE += 0.5 * weight * (magSqr(xii) * hi + bi);
+        // Obtain the gradient of conserved variables in local frame by collision
+        vector tempVector1 = frame & rhoGradVol_[own];
+        tensor tempTensor = frame & rhoUgradVol_[own] & frame.T();
+        vector tempVector2 = frame & rhoEgradVol_[own];
+        scalarField N = VariablesToField(tempVector1.x(), tempTensor.T().x(), tempVector2.x());
+        scalarField T1 = VariablesToField(tempVector1.y(), tempTensor.T().y(), tempVector2.y());
+        scalarField T2 = VariablesToField(tempVector1.z(), tempTensor.T().z(), tempVector2.z());
+        scalarField aL = MicroSlope(N, primL);
+        scalarField bL = MicroSlope(T1, primL);
+        scalarField cL = MicroSlope(T2, primL);
 
-            // Obtain the gradient of conserved variables by collision
-            Nrho += weight * dhi.x();
-            NrhoU += weight * xii * dhi.x();
-            NrhoE += 0.5 * weight * (magSqr(xii) * dhi.x() + dbi.x());
+        tempVector1 = frame & rhoGradVol_[nei];
+        tempTensor = frame & rhoUgradVol_[nei] & frame.T();
+        tempVector2 = frame & rhoEgradVol_[nei];
+        N = VariablesToField(tempVector1.x(), tempTensor.T().x(), tempVector2.x());
+        T1 = VariablesToField(tempVector1.y(), tempTensor.T().y(), tempVector2.y());
+        T2 = VariablesToField(tempVector1.z(), tempTensor.T().z(), tempVector2.z());
+        scalarField aR = MicroSlope(N, primR);
+        scalarField bR = MicroSlope(T1, primR);
+        scalarField cR = MicroSlope(T2, primR);
 
-            T1rho += weight * dhi.y();
-            T1rhoU += weight * xii * dhi.y();
-            T1rhoE += 0.5 * weight * (magSqr(xii) * dhi.y() + dbi.y());
+        N = primL[0] * Moment_auv1v2xi(aL, MuL_L, Mv1_L, Mv2_L, Mxi_L, 0, 0, 0) + primR[0] * Moment_auv1v2xi(aR, MuR_R, Mv1_R, Mv2_R, Mxi_R, 0, 0, 0);
+        T1 = primL[0] * Moment_auv1v2xi(bL, MuL_L, Mv1_L, Mv2_L, Mxi_L, 0, 0, 0) + primR[0] * Moment_auv1v2xi(bR, MuR_R, Mv1_R, Mv2_R, Mxi_R, 0, 0, 0);
+        T2 = primL[0] * Moment_auv1v2xi(cL, MuL_L, Mv1_L, Mv2_L, Mxi_L, 0, 0, 0) + primR[0] * Moment_auv1v2xi(cR, MuR_R, Mv1_R, Mv2_R, Mxi_R, 0, 0, 0);
 
-            T2rho += weight * dhi.z();
-            T2rhoU += weight * xii * dhi.z();
-            T2rhoE += 0.5 * weight * (magSqr(xii) * dhi.z() + dbi.z());
-        }
-
-        scalarField N = VariablesToField(Nrho, NrhoU, NrhoE);
-        scalarField T1 = VariablesToField(T1rho, T1rhoU, T1rhoE);
-        scalarField T2 = VariablesToField(T2rho, T2rhoU, T2rhoE);
+        // Calculate aBar, bBar, cBar and related moment
         scalarField prim = ConservedToPrim(rho, rhoU, rhoE);
         scalarField aBar = MicroSlope(N, prim);
         scalarField bBar = MicroSlope(T1, prim);
@@ -416,6 +396,30 @@ void Foam::fvDVM::CalcFluxSurf()
         forAll(DV_, dvi)
         {
             DiscreteVelocityPoint &dv = DV_[dvi];
+            const vector xii = frame & dv.xi(); // Micro velocity in local frame
+            ui[dvi] = xii;
+
+            if (xii.x() >= VSMALL) // Comming from own
+            {
+                h[dvi] = dv.hVol()[own] + (dv.hGradVol()[own] & (Cf[facei] - C[own]));
+                b[dvi] = dv.bVol()[own] + (dv.bGradVol()[own] & (Cf[facei] - C[own]));
+                dh[dvi] = frame & dv.hGradVol()[own];
+                db[dvi] = frame & dv.bGradVol()[own];
+            }
+            else if (xii.x() < -VSMALL) // Comming form nei
+            {
+                h[dvi] = dv.hVol()[nei] + (dv.hGradVol()[nei] & (Cf[facei] - C[nei]));
+                b[dvi] = dv.bVol()[nei] + (dv.bGradVol()[nei] & (Cf[facei] - C[nei]));
+                dh[dvi] = frame & dv.hGradVol()[nei];
+                db[dvi] = frame & dv.bGradVol()[nei];
+            }
+            else
+            {
+                h[dvi] = 0.5 * (dv.hVol()[own] + (dv.hGradVol()[own] & (Cf[facei] - C[own])) + dv.hVol()[nei] + (dv.hGradVol()[nei] & (Cf[facei] - C[nei])));
+                b[dvi] = 0.5 * (dv.bVol()[own] + (dv.bGradVol()[own] & (Cf[facei] - C[own])) + dv.bVol()[nei] + (dv.bGradVol()[nei] & (Cf[facei] - C[nei])));
+                dh[dvi] = 0.5 * frame & (dv.hGradVol()[own] + dv.hGradVol()[nei]);
+                db[dvi] = 0.5 * frame & (dv.bGradVol()[own] + dv.bGradVol()[nei]);
+            }
             vector c = ui[dvi] - U;
             qf += 0.5 * dv.weight() * c * (magSqr(c) * h[dvi] + b[dvi]);
         }
@@ -1011,7 +1015,7 @@ void Foam::fvDVM::getCoNum(scalar &maxCoNum, scalar &meanCoNum)
     scalarField UbyDxMicro = mesh_.deltaCoeffs() * sqrt(scalar(mesh_.nSolutionD())) * xiMax();
     scalarField UbyDxMacro(((cmptMag(Uvol()) + getSoundSpeed() * vector(1.0, 1.0, 1.0)) & VolPro()) / mesh_.V());
     maxCoNum = max(gMax(UbyDxMacro), gMax(UbyDxMicro)) * dt;
-    meanCoNum = max(gSum(UbyDxMacro), gSum(UbyDxMicro)) / UbyDxMacro.size() * dt;
+    meanCoNum = max(gSum(UbyDxMacro) / UbyDxMacro.size(), gSum(UbyDxMicro) / UbyDxMicro.size()) * dt;
 }
 
 tmp<scalarField> Foam::fvDVM::getSoundSpeed()
