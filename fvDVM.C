@@ -308,21 +308,21 @@ void Foam::fvDVM::CalcFluxSurf()
 
         // Moment
         scalarField Mu(7), MuL(7), MuR(7), Mv1(6), Mv2(6), Mxi(3);
-        scalarField M0u(5), Mau(5), Mbv1(5), Mcv2(5), MaTu(5), Mt(5);
         scalarField Mu_L(7), MuL_L(7), MuR_L(7), Mv1_L(6), Mv2_L(6), Mxi_L(3);
         scalarField Mu_R(7), MuL_R(7), MuR_R(7), Mv1_R(6), Mv2_R(6), Mxi_R(3);
+        scalarField M0u(5), Mau(5), Mbv1(5), Mcv2(5), MaTu(5), Mt(5);
 
         // Obtain the conserved variables in local frame by collision
         PrimToConserved(rhoVol_[own], Uvol_[own], lambdaVol_[own], rhoL, rhoUL, rhoEL);
         rhoL = rhoL + (rhoGradVol_[own] & (Cf[facei] - C[own]));
-        rhoUL = frame & (rhoUL + (rhoUgradVol_[own] & (Cf[facei] - C[own])));
+        rhoUL = frame & (rhoUL + (rhoUgradVol_[own].T() & (Cf[facei] - C[own])));
         rhoEL = rhoEL + (rhoEgradVol_[own] & (Cf[facei] - C[own]));
         scalarField primL = ConservedToPrim(rhoL, rhoUL, rhoEL);
         CalcMoment(primL, Mu_L, Mv1_L, Mv2_L, Mxi_L, MuL_L, MuR_L);
 
         PrimToConserved(rhoVol_[nei], Uvol_[nei], lambdaVol_[nei], rhoR, rhoUR, rhoER);
         rhoR = rhoR + (rhoGradVol_[nei] & (Cf[facei] - C[nei]));
-        rhoUR = frame & (rhoUR + (rhoUgradVol_[nei] & (Cf[facei] - C[nei])));
+        rhoUR = frame & (rhoUR + (rhoUgradVol_[nei].T() & (Cf[facei] - C[nei])));
         rhoER = rhoER + (rhoEgradVol_[nei] & (Cf[facei] - C[nei]));
         scalarField primR = ConservedToPrim(rhoR, rhoUR, rhoER);
         CalcMoment(primR, Mu_R, Mv1_R, Mv2_R, Mxi_R, MuL_R, MuR_R);
@@ -335,9 +335,9 @@ void Foam::fvDVM::CalcFluxSurf()
         vector tempVector1 = frame & rhoGradVol_[own];
         tensor tempTensor = frame & rhoUgradVol_[own] & frame.T();
         vector tempVector2 = frame & rhoEgradVol_[own];
-        scalarField N = VariablesToField(tempVector1.x(), tempTensor.T().x(), tempVector2.x());
-        scalarField T1 = VariablesToField(tempVector1.y(), tempTensor.T().y(), tempVector2.y());
-        scalarField T2 = VariablesToField(tempVector1.z(), tempTensor.T().z(), tempVector2.z());
+        scalarField N = VariablesToField(tempVector1.x(), tempTensor.x(), tempVector2.x());
+        scalarField T1 = VariablesToField(tempVector1.y(), tempTensor.y(), tempVector2.y());
+        scalarField T2 = VariablesToField(tempVector1.z(), tempTensor.z(), tempVector2.z());
         scalarField aL = MicroSlope(N, primL);
         scalarField bL = MicroSlope(T1, primL);
         scalarField cL = MicroSlope(T2, primL);
@@ -345,9 +345,9 @@ void Foam::fvDVM::CalcFluxSurf()
         tempVector1 = frame & rhoGradVol_[nei];
         tempTensor = frame & rhoUgradVol_[nei] & frame.T();
         tempVector2 = frame & rhoEgradVol_[nei];
-        N = VariablesToField(tempVector1.x(), tempTensor.T().x(), tempVector2.x());
-        T1 = VariablesToField(tempVector1.y(), tempTensor.T().y(), tempVector2.y());
-        T2 = VariablesToField(tempVector1.z(), tempTensor.T().z(), tempVector2.z());
+        N = VariablesToField(tempVector1.x(), tempTensor.x(), tempVector2.x());
+        T1 = VariablesToField(tempVector1.y(), tempTensor.y(), tempVector2.y());
+        T2 = VariablesToField(tempVector1.z(), tempTensor.z(), tempVector2.z());
         scalarField aR = MicroSlope(N, primR);
         scalarField bR = MicroSlope(T1, primR);
         scalarField cR = MicroSlope(T2, primR);
