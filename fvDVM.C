@@ -327,9 +327,6 @@ void Foam::fvDVM::CalcFluxSurf()
         scalarField primR = ConservedToPrim(rhoR, rhoUR, rhoER);
         CalcMoment(primR, Mu_R, Mv1_R, Mv2_R, Mxi_R, MuL_R, MuR_R);
 
-        // scalarField conVars(primL[0] * Moment_uv1v2xi(MuL_L, Mv1_L, Mv2_L, Mxi_L, 0, 0, 0, 0) +
-        //                     primR[0] * Moment_uv1v2xi(MuR_R, Mv1_R, Mv2_R, Mxi_R, 0, 0, 0, 0));
-        // FieldToVariables(conVars, rho, rhoU, rhoE);
         scalar dL = mag(Cf[facei] - C[own]);
         scalar dR = mag(C[nei] - Cf[facei]);
         scalar d = dL+dR;
