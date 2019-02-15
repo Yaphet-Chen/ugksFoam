@@ -262,7 +262,8 @@ void Foam::fvDVM::Reconstruction()
             forAll(rhoVolPatch, pfacei)
             {
                 scalar own = pOwner[pfacei];
-                rhoVolPatch[pfacei] = rhoVol_[own] + (rhoGradVol_[own] & (CfPatch[pfacei] - C[own]));
+                rhoVolPatch[pfacei] = rhoVol()[own] / lambdaVol()[own] * lambdaVolPatch[pfacei];
+                // rhoVolPatch[pfacei] = rhoVol_[own] + (rhoGradVol_[own] & (CfPatch[pfacei] - C[own]));
             }
         }
     }
@@ -329,10 +330,10 @@ void Foam::fvDVM::CalcFluxSurf()
 
         scalar dL = mag(Cf[facei] - C[own]);
         scalar dR = mag(C[nei] - Cf[facei]);
-        scalar d = dL+dR;
-        rho = (dR*rhoL+dL*rhoR)/d;
-        rhoU = (dR*rhoUL+dL*rhoUR)/d;
-        rhoE = (dR*rhoEL+dL*rhoER)/d;
+        scalar d = dL + dR;
+        rho = (dR * rhoL + dL * rhoR) / d;
+        rhoU = (dR * rhoUL + dL * rhoUR) / d;
+        rhoE = (dR * rhoEL + dL * rhoER) / d;
 
         // Obtain the gradient of conserved variables in local frame by collision
         vector tempVector1 = frame & rhoGradVol_[own];
