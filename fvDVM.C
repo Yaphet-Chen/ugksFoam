@@ -168,7 +168,6 @@ void Foam::fvDVM::SetLocalFrame()
         const fvsPatchField<vector> &nfPatch =
             nf.boundaryField()[patchi];
 
-        // const labelUList &pOwner = mesh_.boundary()[patchi].faceCells();
         forAll(LocalFrameSurfPatch, pFacei)
         {
             LocalFrameSurfPatch[pFacei] = GramSchmidtProcess(nfPatch[pFacei]);
@@ -593,15 +592,15 @@ void Foam::fvDVM::CalcFluxSurf()
             (
                 rhoEgradVol_.boundaryField()[patchi].patchNeighbourField()
             );
-            PtrList<scalarField> hVolNei, bVolNei;
-            PtrList<vectorField> hGradVolNei, bGradVolNei;
+            PtrList<scalarField> hVolNei(nXi()), bVolNei(nXi());
+            PtrList<vectorField> hGradVolNei(nXi()), bGradVolNei(nXi());
             forAll(DV_, dvi)
             {
                 DiscreteVelocityPoint &dv = DV_[dvi];
-                hVolNei[dvi] = dv.hVol().boundaryField()[patchi].patchNeighbourField();
-                bVolNei[dvi] = dv.bVol().boundaryField()[patchi].patchNeighbourField();
-                hGradVolNei[dvi] = dv.hGradVol().boundaryField()[patchi].patchNeighbourField();
-                bGradVolNei[dvi] = dv.bGradVol().boundaryField()[patchi].patchNeighbourField();
+                hVolNei.set(dvi, dv.hVol().boundaryField()[patchi].patchNeighbourField());
+                bVolNei.set(dvi, dv.bVol().boundaryField()[patchi].patchNeighbourField());
+                hGradVolNei.set(dvi, dv.hGradVol().boundaryField()[patchi].patchNeighbourField());
+                bGradVolNei.set(dvi, dv.bGradVol().boundaryField()[patchi].patchNeighbourField());
             }
 
             rhoFluxPatch = 0.0;
@@ -747,32 +746,32 @@ void Foam::fvDVM::CalcFluxSurf()
                     qf += 0.5 * dv.weight() * c * (magSqr(c) * h[dvi] + b[dvi]);
                 }
 
-            forAll(DV_, dvi)
-            {
-                DiscreteVelocityPoint &dv = DV_[dvi];
-                const vector &xii = ui[dvi];
-                const scalar &vn = xii.x();
-                const scalar &weight = dv.weight();
-                const scalar &hi = h[dvi];
-                const scalar &bi = b[dvi];
-                const vector &dhi = dh[dvi];
-                const vector &dbi = db[dvi];
+                forAll(DV_, dvi)
+                {
+                    DiscreteVelocityPoint &dv = DV_[dvi];
+                    const vector &xii = ui[dvi];
+                    const scalar &vn = xii.x();
+                    const scalar &weight = dv.weight();
+                    const scalar &hi = h[dvi];
+                    const scalar &bi = b[dvi];
+                    const vector &dhi = dh[dvi];
+                    const vector &dbi = db[dvi];
 
-                scalar H0, B0, Hplus, Bplus;
-                DiscreteMaxwell(H0, B0, rho, U, lambda, xii);
-                ShakhovPart(H0, B0, rho, U, lambda, qf, xii, Hplus, Bplus);
+                    scalar H0, B0, Hplus, Bplus;
+                    DiscreteMaxwell(H0, B0, rho, U, lambda, xii);
+                    ShakhovPart(H0, B0, rho, U, lambda, qf, xii, Hplus, Bplus);
 
-                rhoFluxPatch[pFacei] += weight * vn * (Mt[0] * Hplus + Mt[3] * hi - Mt[4] * (xii & dhi));
-                rhoUfluxPatch[pFacei] += weight * vn * xii * (Mt[0] * Hplus + Mt[3] * hi - Mt[4] * (xii & dhi));
-                rhoEfluxPatch[pFacei] += 0.5 * weight * vn * (Mt[0] * (magSqr(xii) * Hplus + Bplus) + Mt[3] * (magSqr(xii) * hi + bi) - Mt[4] * (magSqr(xii) * (xii & dhi) + (xii & dbi)));
+                    rhoFluxPatch[pFacei] += weight * vn * (Mt[0] * Hplus + Mt[3] * hi - Mt[4] * (xii & dhi));
+                    rhoUfluxPatch[pFacei] += weight * vn * xii * (Mt[0] * Hplus + Mt[3] * hi - Mt[4] * (xii & dhi));
+                    rhoEfluxPatch[pFacei] += 0.5 * weight * vn * (Mt[0] * (magSqr(xii) * Hplus + Bplus) + Mt[3] * (magSqr(xii) * hi + bi) - Mt[4] * (magSqr(xii) * (xii & dhi) + (xii & dbi)));
 
-                dv.UpdatehFlux().boundaryFieldRef()[patchi][pFacei] = vn * (Mt[0] * (H0 + Hplus) + Mt[1] * (xii.x() * (aRho * H0 + (aU & xii) * H0 + 0.5 * aLambda * (magSqr(xii) * H0 + B0)) + xii.y() * (bRho * H0 + (bU & xii) * H0 + 0.5 * bLambda * (magSqr(xii) * H0 + B0)) + xii.z() * (cRho * H0 + (cU & xii) * H0 + 0.5 * cLambda * (magSqr(xii) * H0 + B0))) + Mt[2] * (aTrho * H0 + (aTU & xii) * H0 + 0.5 * aTlambda * (magSqr(xii) * H0 + B0)) + Mt[3] * hi - Mt[4] * (xii & dhi)) * magSfPatch[pFacei];
+                    dv.UpdatehFlux().boundaryFieldRef()[patchi][pFacei] = vn * (Mt[0] * (H0 + Hplus) + Mt[1] * (xii.x() * (aRho * H0 + (aU & xii) * H0 + 0.5 * aLambda * (magSqr(xii) * H0 + B0)) + xii.y() * (bRho * H0 + (bU & xii) * H0 + 0.5 * bLambda * (magSqr(xii) * H0 + B0)) + xii.z() * (cRho * H0 + (cU & xii) * H0 + 0.5 * cLambda * (magSqr(xii) * H0 + B0))) + Mt[2] * (aTrho * H0 + (aTU & xii) * H0 + 0.5 * aTlambda * (magSqr(xii) * H0 + B0)) + Mt[3] * hi - Mt[4] * (xii & dhi)) * magSfPatch[pFacei];
 
-                dv.UpdatebFlux().boundaryFieldRef()[patchi][pFacei] = vn * (Mt[0] * (B0 + Bplus) + Mt[1] * (xii.x() * (aRho * B0 + (aU & xii) * B0 + 0.5 * aLambda * (magSqr(xii) * B0 + Mxi[2] * H0)) + xii.y() * (bRho * B0 + (bU & xii) * B0 + 0.5 * bLambda * (magSqr(xii) * B0 + Mxi[2] * H0)) + xii.z() * (cRho * B0 + (cU & xii) * B0 + 0.5 * cLambda * (magSqr(xii) * B0 + Mxi[2] * H0))) + Mt[2] * (aTrho * B0 + (aTU & xii) * B0 + 0.5 * aTlambda * (magSqr(xii) * B0 + Mxi[2] * H0)) + Mt[3] * bi - Mt[4] * (xii & dbi)) * magSfPatch[pFacei];
-            }
-            rhoFluxPatch[pFacei] = rhoFluxPatch[pFacei] * magSfPatch[pFacei];
-            rhoUfluxPatch[pFacei] = (frame.T() & rhoUfluxPatch[pFacei]) * magSfPatch[pFacei];
-            rhoEfluxPatch[pFacei] = rhoEfluxPatch[pFacei] * magSfPatch[pFacei];
+                    dv.UpdatebFlux().boundaryFieldRef()[patchi][pFacei] = vn * (Mt[0] * (B0 + Bplus) + Mt[1] * (xii.x() * (aRho * B0 + (aU & xii) * B0 + 0.5 * aLambda * (magSqr(xii) * B0 + Mxi[2] * H0)) + xii.y() * (bRho * B0 + (bU & xii) * B0 + 0.5 * bLambda * (magSqr(xii) * B0 + Mxi[2] * H0)) + xii.z() * (cRho * B0 + (cU & xii) * B0 + 0.5 * cLambda * (magSqr(xii) * B0 + Mxi[2] * H0))) + Mt[2] * (aTrho * B0 + (aTU & xii) * B0 + 0.5 * aTlambda * (magSqr(xii) * B0 + Mxi[2] * H0)) + Mt[3] * bi - Mt[4] * (xii & dbi)) * magSfPatch[pFacei];
+                }
+                rhoFluxPatch[pFacei] = rhoFluxPatch[pFacei] * magSfPatch[pFacei];
+                rhoUfluxPatch[pFacei] = (frame.T() & rhoUfluxPatch[pFacei]) * magSfPatch[pFacei];
+                rhoEfluxPatch[pFacei] = rhoEfluxPatch[pFacei] * magSfPatch[pFacei];
             }
         }
     }
@@ -1228,8 +1227,10 @@ void Foam::fvDVM::getCoNum(scalar &maxCoNum, scalar &meanCoNum)
     scalar dt = time_.deltaTValue();
     scalarField UbyDxMicro = mesh_.deltaCoeffs() * sqrt(scalar(mesh_.nSolutionD())) * xiMax();
     scalarField UbyDxMacro(((cmptMag(Uvol()) + getSoundSpeed() * vector(1.0, 1.0, 1.0)) & VolPro()) / mesh_.V());
-    maxCoNum = max(gMax(UbyDxMacro), gMax(UbyDxMicro)) * dt;
-    meanCoNum = max(gSum(UbyDxMacro) / UbyDxMacro.size(), gSum(UbyDxMicro) / UbyDxMicro.size()) * dt;
+    // maxCoNum = max(gMax(UbyDxMacro), gMax(UbyDxMicro)) * dt;
+    // meanCoNum = max(gSum(UbyDxMacro) / UbyDxMacro.size(), gSum(UbyDxMicro) / UbyDxMicro.size()) * dt;
+    maxCoNum = gMax(UbyDxMicro) * dt;
+    meanCoNum = gSum(UbyDxMicro) / UbyDxMicro.size() * dt;
 }
 
 tmp<scalarField> Foam::fvDVM::getSoundSpeed()
