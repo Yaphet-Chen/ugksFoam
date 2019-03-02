@@ -269,7 +269,23 @@ void Foam::fvDVM::Reconstruction()
 }
 
 void Foam::fvDVM::CalcFluxSurf()
-{
+{   
+    // Prepare date for processor boundary
+    rhoVol_.correctBoundaryConditions();
+    Uvol_.correctBoundaryConditions();
+    lambdaVol_.correctBoundaryConditions();
+    rhoGradVol_.correctBoundaryConditions();
+    rhoUgradVol_.correctBoundaryConditions();
+    rhoEgradVol_.correctBoundaryConditions();
+    forAll(DV_, dvi)
+    {
+        DiscreteVelocityPoint &dv = DV_[dvi];
+        dv.hVol_par().correctBoundaryConditions();
+        dv.bVol_par().correctBoundaryConditions();
+        dv.hGradVol_par().correctBoundaryConditions();
+        dv.bGradVol_par().correctBoundaryConditions();
+    }
+
     // Init Flux to zero
     rhoFluxSurf_ = dimensionedScalar("0", rhoFluxSurf_.dimensions(), 0);
     rhoUfluxSurf_ = dimensionedVector("0", rhoUfluxSurf_.dimensions(), vector(0, 0, 0));
@@ -564,17 +580,14 @@ void Foam::fvDVM::CalcFluxSurf()
         }
         else if (rhoVol_.boundaryField()[patchi].coupled())
         {
-            rhoVol_.correctBoundaryConditions();
             Field<scalar> rhoVolNei
             (
                 rhoVol_.boundaryField()[patchi].patchNeighbourField()
             );
-            Uvol_.correctBoundaryConditions();
             Field<vector> UvolNei
             (
                 Uvol_.boundaryField()[patchi].patchNeighbourField()
             );
-            lambdaVol_.correctBoundaryConditions();
             Field<scalar> lambdaVolNei
             (
                 lambdaVol_.boundaryField()[patchi].patchNeighbourField()
@@ -583,17 +596,14 @@ void Foam::fvDVM::CalcFluxSurf()
             (
                 C.boundaryField()[patchi].patchNeighbourField()
             );
-            rhoGradVol_.correctBoundaryConditions();
             const Field<vector> rhoGradVolNei
             (
                 rhoGradVol_.boundaryField()[patchi].patchNeighbourField()
             );
-            rhoUgradVol_.correctBoundaryConditions();
             const Field<tensor> rhoUgradVolNei
             (
                 rhoUgradVol_.boundaryField()[patchi].patchNeighbourField()
             );
-            rhoEgradVol_.correctBoundaryConditions();
             const Field<vector> rhoEgradVolNei
             (
                 rhoEgradVol_.boundaryField()[patchi].patchNeighbourField()
@@ -604,13 +614,9 @@ void Foam::fvDVM::CalcFluxSurf()
             forAll(DV_, dvi)
             {
                 DiscreteVelocityPoint &dv = DV_[dvi];
-                dv.hVol_par().correctBoundaryConditions();
                 hVolNei.set(dvi, dv.hVol_par().boundaryField()[patchi].patchNeighbourField());
-                dv.bVol_par().correctBoundaryConditions();
                 bVolNei.set(dvi, dv.bVol_par().boundaryField()[patchi].patchNeighbourField());
-                dv.hGradVol_par().correctBoundaryConditions();
                 hGradVolNei.set(dvi, dv.hGradVol_par().boundaryField()[patchi].patchNeighbourField());
-                dv.bGradVol_par().correctBoundaryConditions();
                 bGradVolNei.set(dvi, dv.bGradVol_par().boundaryField()[patchi].patchNeighbourField());
             }
 
