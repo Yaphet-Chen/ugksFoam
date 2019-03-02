@@ -564,14 +564,17 @@ void Foam::fvDVM::CalcFluxSurf()
         }
         else if (rhoVol_.boundaryField()[patchi].coupled())
         {
+            rhoVol_.correctBoundaryConditions();
             Field<scalar> rhoVolNei
             (
                 rhoVol_.boundaryField()[patchi].patchNeighbourField()
             );
+            Uvol_.correctBoundaryConditions();
             Field<vector> UvolNei
             (
                 Uvol_.boundaryField()[patchi].patchNeighbourField()
             );
+            lambdaVol_.correctBoundaryConditions();
             Field<scalar> lambdaVolNei
             (
                 lambdaVol_.boundaryField()[patchi].patchNeighbourField()
@@ -580,27 +583,35 @@ void Foam::fvDVM::CalcFluxSurf()
             (
                 C.boundaryField()[patchi].patchNeighbourField()
             );
+            rhoGradVol_.correctBoundaryConditions();
             const Field<vector> rhoGradVolNei
             (
                 rhoGradVol_.boundaryField()[patchi].patchNeighbourField()
             );
+            rhoUgradVol_.correctBoundaryConditions();
             const Field<tensor> rhoUgradVolNei
             (
                 rhoUgradVol_.boundaryField()[patchi].patchNeighbourField()
             );
+            rhoEgradVol_.correctBoundaryConditions();
             const Field<vector> rhoEgradVolNei
             (
                 rhoEgradVol_.boundaryField()[patchi].patchNeighbourField()
             );
+
             PtrList<scalarField> hVolNei(nXi()), bVolNei(nXi());
             PtrList<vectorField> hGradVolNei(nXi()), bGradVolNei(nXi());
             forAll(DV_, dvi)
             {
                 DiscreteVelocityPoint &dv = DV_[dvi];
-                hVolNei.set(dvi, dv.hVol().boundaryField()[patchi].patchNeighbourField());
-                bVolNei.set(dvi, dv.bVol().boundaryField()[patchi].patchNeighbourField());
-                hGradVolNei.set(dvi, dv.hGradVol().boundaryField()[patchi].patchNeighbourField());
-                bGradVolNei.set(dvi, dv.bGradVol().boundaryField()[patchi].patchNeighbourField());
+                dv.hVol_par().correctBoundaryConditions();
+                hVolNei.set(dvi, dv.hVol_par().boundaryField()[patchi].patchNeighbourField());
+                dv.bVol_par().correctBoundaryConditions();
+                bVolNei.set(dvi, dv.bVol_par().boundaryField()[patchi].patchNeighbourField());
+                dv.hGradVol_par().correctBoundaryConditions();
+                hGradVolNei.set(dvi, dv.hGradVol_par().boundaryField()[patchi].patchNeighbourField());
+                dv.bGradVol_par().correctBoundaryConditions();
+                bGradVolNei.set(dvi, dv.bGradVol_par().boundaryField()[patchi].patchNeighbourField());
             }
 
             rhoFluxPatch = 0.0;
@@ -1225,12 +1236,16 @@ Foam::fvDVM::~fvDVM()
 void Foam::fvDVM::getCoNum(scalar &maxCoNum, scalar &meanCoNum)
 {
     scalar dt = time_.deltaTValue();
-    scalarField UbyDxMicro = mesh_.deltaCoeffs() * sqrt(scalar(mesh_.nSolutionD())) * xiMax();
     scalarField UbyDxMacro(((cmptMag(Uvol()) + getSoundSpeed() * vector(1.0, 1.0, 1.0)) & VolPro()) / mesh_.V());
-    // maxCoNum = max(gMax(UbyDxMacro), gMax(UbyDxMicro)) * dt;
-    // meanCoNum = max(gSum(UbyDxMacro) / UbyDxMacro.size(), gSum(UbyDxMicro) / UbyDxMicro.size()) * dt;
-    maxCoNum = gMax(UbyDxMicro) * dt;
-    meanCoNum = gSum(UbyDxMicro) / UbyDxMicro.size() * dt;
+    scalarField UbyDxMicro = mesh_.deltaCoeffs() * sqrt(scalar(mesh_.nSolutionD())) * xiMax();
+    
+    label UbyDxMacro_size = UbyDxMacro.size();
+    reduce<label>(UbyDxMacro_size, sumOp<label>(), Pstream::msgType(), UPstream::worldComm);
+    label UbyDxMicro_size = UbyDxMicro.size();
+    reduce<label>(UbyDxMicro_size, sumOp<label>(), Pstream::msgType(), UPstream::worldComm);
+
+    meanCoNum = max(gSum(UbyDxMacro) / UbyDxMacro_size, gSum(UbyDxMicro) / UbyDxMicro_size) * dt;
+    maxCoNum = max(gMax(UbyDxMacro), gMax(UbyDxMicro)) * dt;
 }
 
 tmp<scalarField> Foam::fvDVM::getSoundSpeed()
