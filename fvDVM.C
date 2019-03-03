@@ -236,6 +236,11 @@ tensor Foam::fvDVM::GramSchmidtProcess(const vector a)
 
 void Foam::fvDVM::Reconstruction()
 {
+    // Prepare date for processor boundary
+    rhoVol_.correctBoundaryConditions();
+    Uvol_.correctBoundaryConditions();
+    lambdaVol_.correctBoundaryConditions();
+
     forAll(DV_, DVid)
         DV_[DVid].Reconstruction();
 
@@ -266,26 +271,14 @@ void Foam::fvDVM::Reconstruction()
     rhoGradVol_ = fvc::grad(rhoVol_);
     rhoUgradVol_ = fvc::grad(rhoVol_ * Uvol_);
     rhoEgradVol_ = fvc::grad(0.5 * rhoVol_ * (magSqr(Uvol_) + (KInner() + 3) / (2.0 * lambdaVol_)));
+    // Prepare date for processor boundary
+    rhoGradVol_.correctBoundaryConditions();
+    rhoUgradVol_.correctBoundaryConditions();
+    rhoEgradVol_.correctBoundaryConditions();
 }
 
 void Foam::fvDVM::CalcFluxSurf()
 {   
-    // Prepare date for processor boundary
-    rhoVol_.correctBoundaryConditions();
-    Uvol_.correctBoundaryConditions();
-    lambdaVol_.correctBoundaryConditions();
-    rhoGradVol_.correctBoundaryConditions();
-    rhoUgradVol_.correctBoundaryConditions();
-    rhoEgradVol_.correctBoundaryConditions();
-    forAll(DV_, dvi)
-    {
-        DiscreteVelocityPoint &dv = DV_[dvi];
-        dv.hVol_par().correctBoundaryConditions();
-        dv.bVol_par().correctBoundaryConditions();
-        dv.hGradVol_par().correctBoundaryConditions();
-        dv.bGradVol_par().correctBoundaryConditions();
-    }
-
     // Init Flux to zero
     rhoFluxSurf_ = dimensionedScalar("0", rhoFluxSurf_.dimensions(), 0);
     rhoUfluxSurf_ = dimensionedVector("0", rhoUfluxSurf_.dimensions(), vector(0, 0, 0));
@@ -614,10 +607,10 @@ void Foam::fvDVM::CalcFluxSurf()
             forAll(DV_, dvi)
             {
                 DiscreteVelocityPoint &dv = DV_[dvi];
-                hVolNei.set(dvi, dv.hVol_par().boundaryField()[patchi].patchNeighbourField());
-                bVolNei.set(dvi, dv.bVol_par().boundaryField()[patchi].patchNeighbourField());
-                hGradVolNei.set(dvi, dv.hGradVol_par().boundaryField()[patchi].patchNeighbourField());
-                bGradVolNei.set(dvi, dv.bGradVol_par().boundaryField()[patchi].patchNeighbourField());
+                hVolNei.set(dvi, dv.hVol().boundaryField()[patchi].patchNeighbourField());
+                bVolNei.set(dvi, dv.bVol().boundaryField()[patchi].patchNeighbourField());
+                hGradVolNei.set(dvi, dv.hGradVol().boundaryField()[patchi].patchNeighbourField());
+                bGradVolNei.set(dvi, dv.bGradVol().boundaryField()[patchi].patchNeighbourField());
             }
 
             rhoFluxPatch = 0.0;

@@ -187,12 +187,6 @@ public:
             //- Return grad b
             inline const volVectorField& bGradVol() const;
 
-            // - Use for MPI parallel computing
-            inline volScalarField& hVol_par();
-            inline volScalarField& bVol_par();
-            inline volVectorField& hGradVol_par();
-            inline volVectorField& bGradVol_par();
-
             //- Return hFlux
             inline const surfaceScalarField& hFluxSurf() const;
 

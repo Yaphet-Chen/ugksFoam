@@ -53,26 +53,6 @@ inline const volVectorField& Foam::DiscreteVelocityPoint::bGradVol() const
     return bGradVol_;
 }
 
-inline volScalarField& Foam::DiscreteVelocityPoint::hVol_par()
-{
-    return hVol_;
-}
-
-inline volScalarField& Foam::DiscreteVelocityPoint::bVol_par()
-{
-    return bVol_;
-}
-
-inline volVectorField& Foam::DiscreteVelocityPoint::hGradVol_par()
-{
-    return hGradVol_;
-}
-
-inline volVectorField& Foam::DiscreteVelocityPoint::bGradVol_par()
-{
-    return bGradVol_;
-}
-
 inline const surfaceScalarField& Foam::DiscreteVelocityPoint::hFluxSurf() const
 {
     return hFluxSurf_;

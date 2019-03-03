@@ -179,6 +179,9 @@ void Foam::DiscreteVelocityPoint::initBoundaryField()
 
 void Foam::DiscreteVelocityPoint::Reconstruction()
 {
+    hVol_.correctBoundaryConditions();
+    bVol_.correctBoundaryConditions();
+    
     const volVectorField &C = mesh_.C();
     // Boundary faces
     forAll(hVol_.boundaryField(), patchi)
@@ -206,6 +209,9 @@ void Foam::DiscreteVelocityPoint::Reconstruction()
     }
     hGradVol_ = fvc::grad(hVol_);
     bGradVol_ = fvc::grad(bVol_);
+    // Prepare date for processor boundary
+    hGradVol_.correctBoundaryConditions();
+    bGradVol_.correctBoundaryConditions();
 }
 
 void Foam::DiscreteVelocityPoint::Update(scalar h, scalar b, label celli)
