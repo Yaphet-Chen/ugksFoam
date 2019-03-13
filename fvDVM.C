@@ -263,7 +263,7 @@ void Foam::fvDVM::Reconstruction()
         {
             forAll(rhoVolPatch, pfacei)
             {
-                scalar own = pOwner[pfacei];
+                label own = pOwner[pfacei];
                 rhoVolPatch[pfacei] = rhoVol()[own] / lambdaVol()[own] * lambdaVolPatch[pfacei]; // Isobaric in boundary cell
             }
         }
@@ -278,7 +278,7 @@ void Foam::fvDVM::Reconstruction()
 }
 
 void Foam::fvDVM::CalcFluxSurf()
-{   
+{
     // Init Flux to zero
     rhoFluxSurf_ = dimensionedScalar("0", rhoFluxSurf_.dimensions(), 0);
     rhoUfluxSurf_ = dimensionedVector("0", rhoUfluxSurf_.dimensions(), vector(0, 0, 0));
@@ -329,7 +329,7 @@ void Foam::fvDVM::CalcFluxSurf()
         rhoU = frame & (dR * rhoUL + dL * rhoUR) / d;
         rhoE = (dR * rhoEL + dL * rhoER) / d;
 
-        // Normal derivative 
+        // Normal derivative
         scalarField N(VariablesToField(rhoR - rhoL, frame & (rhoUR - rhoUL), rhoER - rhoEL) / d);
 
         // W^L in local frame at cell interface
@@ -338,7 +338,7 @@ void Foam::fvDVM::CalcFluxSurf()
         rhoEL = rhoEL + (rhoEgradVol_[own] & (Cf[facei] - C[own]));
         scalarField primL = ConservedToPrim(rhoL, rhoUL, rhoEL);
         CalcMoment(primL, Mu_L, Mv1_L, Mv2_L, Mxi_L, MuL_L, MuR_L);
-        
+
         // W^R in local frame at cell interface
         rhoR = rhoR + (rhoGradVol_[nei] & (Cf[facei] - C[nei]));
         rhoUR = frame & (rhoUR + (rhoUgradVol_[nei].T() & (Cf[facei] - C[nei])));
@@ -573,34 +573,20 @@ void Foam::fvDVM::CalcFluxSurf()
         }
         else if (rhoVol_.boundaryField()[patchi].coupled())
         {
-            Field<scalar> rhoVolNei
-            (
-                rhoVol_.boundaryField()[patchi].patchNeighbourField()
-            );
-            Field<vector> UvolNei
-            (
-                Uvol_.boundaryField()[patchi].patchNeighbourField()
-            );
-            Field<scalar> lambdaVolNei
-            (
-                lambdaVol_.boundaryField()[patchi].patchNeighbourField()
-            );
-            const Field<vector> Cnei
-            (
-                C.boundaryField()[patchi].patchNeighbourField()
-            );
-            const Field<vector> rhoGradVolNei
-            (
-                rhoGradVol_.boundaryField()[patchi].patchNeighbourField()
-            );
-            const Field<tensor> rhoUgradVolNei
-            (
-                rhoUgradVol_.boundaryField()[patchi].patchNeighbourField()
-            );
-            const Field<vector> rhoEgradVolNei
-            (
-                rhoEgradVol_.boundaryField()[patchi].patchNeighbourField()
-            );
+            Field<scalar> rhoVolNei(
+                rhoVol_.boundaryField()[patchi].patchNeighbourField());
+            Field<vector> UvolNei(
+                Uvol_.boundaryField()[patchi].patchNeighbourField());
+            Field<scalar> lambdaVolNei(
+                lambdaVol_.boundaryField()[patchi].patchNeighbourField());
+            const Field<vector> Cnei(
+                C.boundaryField()[patchi].patchNeighbourField());
+            const Field<vector> rhoGradVolNei(
+                rhoGradVol_.boundaryField()[patchi].patchNeighbourField());
+            const Field<tensor> rhoUgradVolNei(
+                rhoUgradVol_.boundaryField()[patchi].patchNeighbourField());
+            const Field<vector> rhoEgradVolNei(
+                rhoEgradVol_.boundaryField()[patchi].patchNeighbourField());
 
             PtrList<scalarField> hVolNei(nXi()), bVolNei(nXi());
             PtrList<vectorField> hGradVolNei(nXi()), bGradVolNei(nXi());
@@ -640,7 +626,7 @@ void Foam::fvDVM::CalcFluxSurf()
                 scalarField Mu_R(7), MuL_R(7), MuR_R(7), Mv1_R(6), Mv2_R(6), Mxi_R(3);
                 scalarField M0u(5), Mau(5), Mbv1(5), Mcv2(5), MaTu(5), Mt(5);
 
-                PrimToConserved(rhoVol_[own], Uvol_[own], lambdaVol_[own], rhoL, rhoUL, rhoEL); // Left cell-centered conservered value
+                PrimToConserved(rhoVol_[own], Uvol_[own], lambdaVol_[own], rhoL, rhoUL, rhoEL);                // Left cell-centered conservered value
                 PrimToConserved(rhoVolNei[pFacei], UvolNei[pFacei], lambdaVolNei[pFacei], rhoR, rhoUR, rhoER); // Left cell-centered conservered value
 
                 // Obtain the conserved variables in local frame at cell interface by central difference
@@ -651,7 +637,7 @@ void Foam::fvDVM::CalcFluxSurf()
                 rhoU = frame & (dR * rhoUL + dL * rhoUR) / d;
                 rhoE = (dR * rhoEL + dL * rhoER) / d;
 
-                // Normal derivative 
+                // Normal derivative
                 scalarField N(VariablesToField(rhoR - rhoL, frame & (rhoUR - rhoUL), rhoER - rhoEL) / d);
 
                 // W^L in local frame at cell interface
@@ -660,7 +646,7 @@ void Foam::fvDVM::CalcFluxSurf()
                 rhoEL = rhoEL + (rhoEgradVol_[own] & (CfPatch[pFacei] - C[own]));
                 scalarField primL = ConservedToPrim(rhoL, rhoUL, rhoEL);
                 CalcMoment(primL, Mu_L, Mv1_L, Mv2_L, Mxi_L, MuL_L, MuR_L);
-            
+
                 // W^R in local frame at cell interface
                 rhoR = rhoR + (rhoGradVolNei[pFacei] & (CfPatch[pFacei] - Cnei[pFacei]));
                 rhoUR = frame & (rhoUR + (rhoUgradVolNei[pFacei].T() & (CfPatch[pFacei] - Cnei[pFacei])));
@@ -1237,7 +1223,7 @@ void Foam::fvDVM::getCoNum(scalar &maxCoNum, scalar &meanCoNum)
     scalar dt = time_.deltaTValue();
     scalarField UbyDxMacro(((cmptMag(Uvol()) + getSoundSpeed() * vector(1.0, 1.0, 1.0)) & VolPro()) / mesh_.V());
     scalarField UbyDxMicro = mesh_.deltaCoeffs() * sqrt(scalar(mesh_.nSolutionD())) * xiMax();
-    
+
     label UbyDxMacro_size = UbyDxMacro.size();
     reduce<label>(UbyDxMacro_size, sumOp<label>(), Pstream::msgType(), UPstream::worldComm);
     label UbyDxMicro_size = UbyDxMicro.size();
