@@ -182,7 +182,6 @@ void Foam::DiscreteVelocityPoint::Reconstruction()
     hVol_.correctBoundaryConditions();
     bVol_.correctBoundaryConditions();
 
-    const scalar dt = time_.deltaTValue();
     const volVectorField &C = mesh_.C();
     // Boundary faces
     forAll(hVol_.boundaryField(), patchi)
@@ -190,10 +189,6 @@ void Foam::DiscreteVelocityPoint::Reconstruction()
         word type = hVol_.boundaryField()[patchi].type();
         fvPatchField<scalar> &hVolPatch = hVol_.boundaryFieldRef()[patchi];
         fvPatchField<scalar> &bVolPatch = bVol_.boundaryFieldRef()[patchi];
-        fvPatchField<scalar> &rhoVolPatch = dvm_.rhoVol().boundaryFieldRef()[patchi];
-        fvPatchField<vector> &UVolPatch = dvm_.Uvol().boundaryFieldRef()[patchi];
-        fvPatchField<scalar> &lambdaVolPatch = dvm_.lambdaVol().boundaryFieldRef()[patchi];
-        const fvsPatchField<vector> &SfPatch = mesh_.Sf().boundaryField()[patchi];
         const fvsPatchField<vector> &CfPatch = mesh_.Cf().boundaryField()[patchi];
         const labelUList &pOwner = mesh_.boundary()[patchi].faceCells();
 
@@ -204,28 +199,11 @@ void Foam::DiscreteVelocityPoint::Reconstruction()
         }
         else if (type == "calculated")
         {
-            DiscreteMaxwell(
-                hVolPatch,
-                bVolPatch,
-                rhoVolPatch,
-                UVolPatch,
-                lambdaVolPatch);
             forAll(hVolPatch, pfacei)
             {
                 label own = pOwner[pfacei];
-                scalar interp_h = hVol_[own] + (hGradVol_[own] & (CfPatch[pfacei] - C[own]));
-                scalar interp_b = bVol_[own] + (bGradVol_[own] & (CfPatch[pfacei] - C[own]));
-                if ((SfPatch[pfacei] & xi_) > 0.0)
-                {
-                    hVolPatch[pfacei] = interp_h;
-                    bVolPatch[pfacei] = interp_b;
-                }
-                else
-                {
-                    scalar tau = dvm_.muRef() * 2.0 * exp((1 - dvm_.omega()) * log(lambdaVolPatch[pfacei])) / rhoVolPatch[pfacei];
-                    hVolPatch[pfacei] = exp(-dt / tau) * interp_h + (1.0 - exp(-dt / tau)) * hVolPatch[pfacei];
-                    bVolPatch[pfacei] = exp(-dt / tau) * interp_b + (1.0 - exp(-dt / tau)) * bVolPatch[pfacei];
-                }
+                hVolPatch[pfacei] = hVol_[own] + (hGradVol_[own] & (CfPatch[pfacei] - C[own]));
+                bVolPatch[pfacei] = bVol_[own] + (bGradVol_[own] & (CfPatch[pfacei] - C[own]));
             }
         }
     }
