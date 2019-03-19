@@ -275,6 +275,24 @@ void Foam::fvDVM::Reconstruction()
     rhoUgradVol_ = fvc::grad(rhoVol_ * Uvol_);
     rhoEgradVol_ = fvc::grad(0.5 * rhoVol_ * (magSqr(Uvol_) + (KInner() + 3) / (2.0 * lambdaVol_)));
 
+    forAll(rhoVol_.boundaryField(), patchi)
+    {
+        word type = rhoVol_.boundaryField()[patchi].type();
+        fvPatchField<scalar> &rhoVolPatch = rhoVol_.boundaryFieldRef()[patchi];
+        const labelUList &pOwner = mesh_.boundary()[patchi].faceCells();
+
+        if (type == "fixedValue")
+        {
+            forAll(rhoVolPatch, pfacei)
+            {
+                label own = pOwner[pfacei];
+                rhoGradVol_[own] = rhoGradVol_[own] * 0.0;
+                rhoUgradVol_[own] = rhoUgradVol_[own] * 0.0;
+                rhoEgradVol_[own] = rhoEgradVol_[own] * 0.0;
+            }
+        }
+    }
+
     // Prepare date for processor boundary
     rhoGradVol_.correctBoundaryConditions();
     rhoUgradVol_.correctBoundaryConditions();
