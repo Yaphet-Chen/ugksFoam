@@ -170,9 +170,9 @@ void Foam::DiscreteVelocityPoint::initBoundaryField()
             DiscreteMaxwell(
                 hBCs[patchi],
                 bBCs[patchi],
-                dvm_.rhoVol().boundaryFieldRef()[patchi],
-                dvm_.Uvol().boundaryFieldRef()[patchi],
-                dvm_.lambdaVol().boundaryFieldRef()[patchi]);
+                dvm_.rhoVol().boundaryField()[patchi],
+                dvm_.Uvol().boundaryField()[patchi],
+                dvm_.lambdaVol().boundaryField()[patchi]);
         }
     }
 }
@@ -210,21 +210,6 @@ void Foam::DiscreteVelocityPoint::Reconstruction()
     hGradVol_ = fvc::grad(hVol_);
     bGradVol_ = fvc::grad(bVol_);
 
-    forAll(hVol_.boundaryField(), patchi)
-    {
-        word type = hVol_.boundaryField()[patchi].type();
-        fvPatchField<scalar> &hVolPatch = hVol_.boundaryFieldRef()[patchi];
-        const labelUList &pOwner = mesh_.boundary()[patchi].faceCells();
-        if (type == "fixedValue")
-        {
-            forAll(hVolPatch, pfacei)
-            {
-                label own = pOwner[pfacei];
-                hGradVol_[own] = hGradVol_[own] * 0.0;
-                bGradVol_[own] = bGradVol_[own] * 0.0;
-            }
-        }
-    }
     // Prepare date for processor boundary
     hGradVol_.correctBoundaryConditions();
     bGradVol_.correctBoundaryConditions();
@@ -271,7 +256,7 @@ void Foam::DiscreteVelocityPoint::DiscreteMaxwell(
     label D = mesh_.nSolutionD();
     label K = dvm_.KInner();
 
-    hEq = rho * pow(sqrt(lambda / pi), D) * exp(-lambda * magSqr(U - xi_));
-    bEq = (K + 3.0 - D) * hEq / (2.0 * lambda);
+    hEq == rho * pow(sqrt(lambda / pi), D) * exp(-lambda * magSqr(U - xi_));
+    bEq == (K + 3.0 - D) * hEq / (2.0 * lambda);
 }
 // ************************************************************************* //

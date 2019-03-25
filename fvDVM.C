@@ -275,24 +275,6 @@ void Foam::fvDVM::Reconstruction()
     rhoUgradVol_ = fvc::grad(rhoVol_ * Uvol_);
     rhoEgradVol_ = fvc::grad(0.5 * rhoVol_ * (magSqr(Uvol_) + (KInner() + 3) / (2.0 * lambdaVol_)));
 
-    forAll(rhoVol_.boundaryField(), patchi)
-    {
-        word type = rhoVol_.boundaryField()[patchi].type();
-        fvPatchField<scalar> &rhoVolPatch = rhoVol_.boundaryFieldRef()[patchi];
-        const labelUList &pOwner = mesh_.boundary()[patchi].faceCells();
-
-        if (type == "fixedValue")
-        {
-            forAll(rhoVolPatch, pfacei)
-            {
-                label own = pOwner[pfacei];
-                rhoGradVol_[own] = rhoGradVol_[own] * 0.0;
-                rhoUgradVol_[own] = rhoUgradVol_[own] * 0.0;
-                rhoEgradVol_[own] = rhoEgradVol_[own] * 0.0;
-            }
-        }
-    }
-
     // Prepare date for processor boundary
     rhoGradVol_.correctBoundaryConditions();
     rhoUgradVol_.correctBoundaryConditions();
@@ -621,16 +603,7 @@ void Foam::fvDVM::CalcFluxSurf()
                 rho = rhoPatch[pFacei];
                 rhoU = Upatch[pFacei];
                 rhoE = lambdaPatch[pFacei];
-                PrimToConserved(rho, rhoU, rhoE, rhoR, rhoUR, rhoER); // Right cell-centered conservered value
-
-                // Obtain the conserved variables in local frame at cell interface by central difference
-                scalar dL = frame.x() & (CfPatch[pFacei] - C[own]);
-                rho = 0.5 * (rhoL + rhoR);
-                rhoU = 0.5 * frame & (rhoUL + rhoUR);
-                rhoE = 0.5 * (rhoEL + rhoER);
-
-                // Normal derivative
-                scalarField N(VariablesToField(rhoR - rhoL, frame & (rhoUR - rhoUL), rhoER - rhoEL) / (2.0 * dL));
+                PrimToConserved(rho, rhoU, rhoE, rhoR, rhoUR, rhoER); // Right cell-centered conservered value 
 
                 // W^L in local frame at cell interface
                 rhoL = rhoL + (rhoGradVol_[own] & (CfPatch[pFacei] - C[own]));
@@ -644,15 +617,23 @@ void Foam::fvDVM::CalcFluxSurf()
                 scalarField primR = ConservedToPrim(rhoR, rhoUR, rhoER);
                 CalcMoment(primR, Mu_R, Mv1_R, Mv2_R, Mxi_R, MuL_R, MuR_R);
 
-                // Obtain the tangential gradient of conserved variables in local frame by collision
+                // Obtain the conserved variables in local frame at cell interface by collision
+                scalarField conVars(primL[0] * Moment_uv1v2xi(MuL_L, Mv1_L, Mv2_L, Mxi_L, 0, 0, 0, 0) +
+                                    primR[0] * Moment_uv1v2xi(MuR_R, Mv1_R, Mv2_R, Mxi_R, 0, 0, 0, 0));
+                FieldToVariables(conVars, rho, rhoU, rhoE);
+
+                // Obtain both normal and tangential gradient of conserved variables in local frame by collision
                 vector tempVector1 = frame & rhoGradVol_[own];
                 tensor tempTensor = frame & rhoUgradVol_[own] & frame.T();
                 vector tempVector2 = frame & rhoEgradVol_[own];
+                scalarField N = VariablesToField(tempVector1.x(), tempTensor.x(), tempVector2.x());
                 scalarField T1 = VariablesToField(tempVector1.y(), tempTensor.y(), tempVector2.y());
                 scalarField T2 = VariablesToField(tempVector1.z(), tempTensor.z(), tempVector2.z());
+                scalarField aL = MicroSlope(N, primL);
                 scalarField bL = MicroSlope(T1, primL);
                 scalarField cL = MicroSlope(T2, primL);
 
+                N = primL[0] * Moment_auv1v2xi(aL, MuL_L, Mv1_L, Mv2_L, Mxi_L, 0, 0, 0);
                 T1 = primL[0] * Moment_auv1v2xi(bL, MuL_L, Mv1_L, Mv2_L, Mxi_L, 0, 0, 0);
                 T2 = primL[0] * Moment_auv1v2xi(cL, MuL_L, Mv1_L, Mv2_L, Mxi_L, 0, 0, 0);
 
