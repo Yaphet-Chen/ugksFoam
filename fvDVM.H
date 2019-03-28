@@ -133,13 +133,6 @@ class fvDVM
     //- Volume pressure
     volScalarField pVol_;
 
-    //- Wall heat flux and stress, only defined at wall boundary faces
-    //- meanningless at other kind of faces
-    IOList<scalar> theta_;
-    IOList<scalar> qWall_;
-    IOList<scalar> normalStressWall_;
-    IOList<scalar> shearStressWall_;
-
     //- Projections of the control volume on the y-z, x-z, x-y plane
     volVectorField VolPro_;
 

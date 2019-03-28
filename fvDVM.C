@@ -491,17 +491,30 @@ void Foam::fvDVM::CalcFluxSurf()
             rhoEfluxPatch = 0.0;
             const label &D = mesh_.nSolutionD();
 
-            if (time_.outputTime())
+            // Wall data output initilization
+            fileName outputDir;
+            if (time_.outputTime() && pOwner.size() != 0)
             {
-                theta_.rename("theta_" + rhoPatch.patch().name());
-                theta_.setSize(rhoPatch.size());
-                qWall_.rename("qWall_" + rhoPatch.patch().name());
-                qWall_.setSize(rhoPatch.size());
-                normalStressWall_.rename("normalStressWall_" + rhoPatch.patch().name());
-                normalStressWall_.setSize(rhoPatch.size());
-                shearStressWall_.rename("shearStressWall_" + rhoPatch.patch().name());
-                shearStressWall_.setSize(rhoPatch.size());
+                if (Pstream::parRun())
+                {
+                    outputDir = time_.path() / ".." / "wallData/";
+                }
+                else
+                {
+                    outputDir = time_.path() / "wallData/";
+                }
+                if (!isDir(outputDir))
+                {
+                    mkDir(outputDir);
+                }
+                outputDir = outputDir + rhoPatch.patch().name() + "_" + time_.timeName();
+                if (Pstream::parRun())
+                {
+                    outputDir = outputDir + "_" + std::to_string(Pstream::myProcNo());
+                }
+                outputDir = outputDir + ".dat";
             }
+            OFstream wallFile(outputDir);
 
             forAll(pOwner, pFacei)
             {
@@ -578,21 +591,18 @@ void Foam::fvDVM::CalcFluxSurf()
                 }
                 if (time_.outputTime())
                 {
-                    theta_[pFacei] = -atan2(CfPatch[pFacei].y(), CfPatch[pFacei].x()) * 180.0 / pi + 180;
-                    normalStressWall_[pFacei] = rhoUfluxPatch[pFacei].x() / dt;
-                    shearStressWall_[pFacei] = (rhoUfluxPatch[pFacei].y() + rhoUfluxPatch[pFacei].z()) / dt;
-                    qWall_[pFacei] = rhoEfluxPatch[pFacei] / dt;
+                    //- Wall heat flux and stress, only defined at wall boundary faces
+                    //- meanningless at other kind of faces
+                    scalar theta_ = -atan2(CfPatch[pFacei].y(), CfPatch[pFacei].x()) * 180.0 / pi + 180;
+                    scalar qWall_ = rhoEfluxPatch[pFacei] / dt;
+                    scalar normalStressWall_ = rhoUfluxPatch[pFacei].x() / dt;
+                    scalar shearStressWall_ = (rhoUfluxPatch[pFacei].y() + rhoUfluxPatch[pFacei].z()) / dt;
+                    wallFile << theta_ << tab << qWall_ << tab << normalStressWall_ << tab << shearStressWall_ << endl;
+                    wallFile.flush();
                 }
                 rhoFluxPatch[pFacei] = rhoFluxPatch[pFacei] * magSfPatch[pFacei];
                 rhoUfluxPatch[pFacei] = (frame.T() & rhoUfluxPatch[pFacei]) * magSfPatch[pFacei];
                 rhoEfluxPatch[pFacei] = rhoEfluxPatch[pFacei] * magSfPatch[pFacei];
-            }
-            if (time_.outputTime())
-            {
-                theta_.write();
-                normalStressWall_.write();
-                shearStressWall_.write();
-                qWall_.write();
             }
         }
         else if (type == "fixedValue")
@@ -1386,34 +1396,6 @@ Foam::fvDVM::fvDVM(
               IOobject::AUTO_WRITE),
           mesh_,
           dimensionedScalar("0", dimless, 0)),
-      theta_(
-          IOobject(
-              "theta_",
-              time_.timeName(),
-              mesh_,
-              IOobject::NO_READ,
-              IOobject::NO_WRITE)),
-      qWall_(
-          IOobject(
-              "qWall",
-              time_.timeName(),
-              mesh_,
-              IOobject::NO_READ,
-              IOobject::NO_WRITE)),
-      normalStressWall_(
-          IOobject(
-              "normalStressWall_",
-              time_.timeName(),
-              mesh_,
-              IOobject::NO_READ,
-              IOobject::NO_WRITE)),
-      shearStressWall_(
-          IOobject(
-              "shearStressWall",
-              time_.timeName(),
-              mesh_,
-              IOobject::NO_READ,
-              IOobject::NO_WRITE)),
       VolPro_(
           IOobject(
               "VolPro",
