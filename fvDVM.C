@@ -491,6 +491,18 @@ void Foam::fvDVM::CalcFluxSurf()
             rhoEfluxPatch = 0.0;
             const label &D = mesh_.nSolutionD();
 
+            if (time_.outputTime())
+            {
+                theta_.rename("theta_" + rhoPatch.patch().name());
+                theta_.setSize(rhoPatch.size());
+                qWall_.rename("qWall_" + rhoPatch.patch().name());
+                qWall_.setSize(rhoPatch.size());
+                normalStressWall_.rename("normalStressWall_" + rhoPatch.patch().name());
+                normalStressWall_.setSize(rhoPatch.size());
+                shearStressWall_.rename("shearStressWall_" + rhoPatch.patch().name());
+                shearStressWall_.setSize(rhoPatch.size());
+            }
+
             forAll(pOwner, pFacei)
             {
                 // Local geometric information
@@ -564,9 +576,23 @@ void Foam::fvDVM::CalcFluxSurf()
                         dv.UpdatebFlux().boundaryFieldRef()[patchi][pFacei] = dt * vn * B_w * magSfPatch[pFacei];
                     }
                 }
+                if (time_.outputTime())
+                {
+                    theta_[pFacei] = -atan2(CfPatch[pFacei].y(), CfPatch[pFacei].x()) * 180.0 / pi + 180;
+                    normalStressWall_[pFacei] = rhoUfluxPatch[pFacei].x() / dt;
+                    shearStressWall_[pFacei] = (rhoUfluxPatch[pFacei].y() + rhoUfluxPatch[pFacei].z()) / dt;
+                    qWall_[pFacei] = rhoEfluxPatch[pFacei] / dt;
+                }
                 rhoFluxPatch[pFacei] = rhoFluxPatch[pFacei] * magSfPatch[pFacei];
                 rhoUfluxPatch[pFacei] = (frame.T() & rhoUfluxPatch[pFacei]) * magSfPatch[pFacei];
                 rhoEfluxPatch[pFacei] = rhoEfluxPatch[pFacei] * magSfPatch[pFacei];
+            }
+            if (time_.outputTime())
+            {
+                theta_.write();
+                normalStressWall_.write();
+                shearStressWall_.write();
+                qWall_.write();
             }
         }
         else if (type == "fixedValue")
@@ -999,13 +1025,17 @@ void Foam::fvDVM::Update()
 
         // Calculate heat flux at t=t^n
         vector qf = vector(0, 0, 0);
+        scalar pressure = 0.0;
         forAll(DV_, dvi)
         {
             DiscreteVelocityPoint &dv = DV_[dvi];
             vector c = dv.xi() - Uold;
-            qf += 0.5 * dv.weight() * c * (magSqr(c) * dv.hVol()[celli] + dv.bVol()[celli]);
+            scalar temp = (magSqr(c) * dv.hVol()[celli] + dv.bVol()[celli]);
+            qf += 0.5 * dv.weight() * c * temp;
+            pressure += (1.0 / 3.0) * dv.weight() * temp;
         }
         qVol_[celli] = qf;
+        pVol_[celli] = pressure;
 
         scalar tau = GetTau(rhoVol_[celli], lambdaVol_[celli]);
 
@@ -1347,6 +1377,43 @@ Foam::fvDVM::fvDVM(
               IOobject::AUTO_WRITE),
           mesh_,
           dimensionedVector("0", dimless, vector(0, 0, 0))),
+      pVol_(
+          IOobject(
+              "P",
+              mesh_.time().timeName(),
+              mesh_,
+              IOobject::NO_READ,
+              IOobject::AUTO_WRITE),
+          mesh_,
+          dimensionedScalar("0", dimless, 0)),
+      theta_(
+          IOobject(
+              "theta_",
+              time_.timeName(),
+              mesh_,
+              IOobject::NO_READ,
+              IOobject::NO_WRITE)),
+      qWall_(
+          IOobject(
+              "qWall",
+              time_.timeName(),
+              mesh_,
+              IOobject::NO_READ,
+              IOobject::NO_WRITE)),
+      normalStressWall_(
+          IOobject(
+              "normalStressWall_",
+              time_.timeName(),
+              mesh_,
+              IOobject::NO_READ,
+              IOobject::NO_WRITE)),
+      shearStressWall_(
+          IOobject(
+              "shearStressWall",
+              time_.timeName(),
+              mesh_,
+              IOobject::NO_READ,
+              IOobject::NO_WRITE)),
       VolPro_(
           IOobject(
               "VolPro",
