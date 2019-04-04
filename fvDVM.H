@@ -229,7 +229,8 @@ class fvDVM
 
     label CheckInterfacePrim(const scalar &rho, const vector &rhoU, const scalar &rhoE, const label &celli, const vector d,
                              scalar &rho_face, vector &U_face, scalar &lambda_face);
-    scalarField GetTimeIntegration(const scalarField &prim, const scalar dt, const scalarField &primL, const scalarField &primR);
+    scalarField GetTimeIntegration(const scalarField &prim, const scalar &dt, const scalarField &primL, const scalarField &primR);
+    scalarField GetTimeIntegration(const scalar &tau, const scalar &dt);
     scalar artificialViscosity(const scalarField &primL, const scalarField &primR);
     void moment_accumulator_first(scalar &rho, vector &rhoU, scalar &rhoE, scalar &h, scalar &b, vector &u, const scalar &hl, const scalar &bl, const tensor &frame, const vector &xi, const scalar &weight, const scalar &hr, const scalar &br);
     void moment_accumulator_second(scalar &rho, vector &rhoU, scalar &rhoE, scalar &h, vector &dh, scalar &b, vector &db, vector &u,

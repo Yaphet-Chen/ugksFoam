@@ -502,12 +502,15 @@ void Foam::fvDVM::CalcFluxSurf()
             }
             prim = ConservedToPrim(rho, rhoU, rhoE);
             if (prim[0] < SMALL || prim[4] < SMALL)
-                Info << "moment_accumulator_first failed!" << nl;
+                Info << "Error: moment_accumulator_first failed at internal face!" << tab
+                     << prim[0] << tab << prim[4] << tab << Cf[facei] << nl;
         }
 
         // Calculate collision time and some time integration terms
         Mt = GetTimeIntegration(prim, dt, primL, primR);
         FieldToVariables(prim, rho, U, lambda);
+
+        // Get heatflux at interface
         vector qf = GetHeatFlux(U, DV_, h, b, ui);
 
         if (faceOrder == 2)
@@ -534,7 +537,7 @@ void Foam::fvDVM::CalcFluxSurf()
             }
         }
         rhoUfluxSurf_[facei] = frame.T() & rhoUfluxSurf_[facei]; // Momentum flux in global frame
-        rhoEfluxSurf_[facei] = 0.5 * rhoEfluxSurf_[facei];       // add the 0.5 back
+        rhoEfluxSurf_[facei] = 0.5 * rhoEfluxSurf_[facei];       // Add the 0.5 back in energy flux
     }
 
     // boundary faces
@@ -544,6 +547,11 @@ void Foam::fvDVM::CalcFluxSurf()
         fvsPatchField<scalar> &rhoFluxPatch = rhoFluxSurf_.boundaryFieldRef()[patchi];
         fvsPatchField<vector> &rhoUfluxPatch = rhoUfluxSurf_.boundaryFieldRef()[patchi];
         fvsPatchField<scalar> &rhoEfluxPatch = rhoEfluxSurf_.boundaryFieldRef()[patchi];
+
+        // Prim^L at boundary interface
+        const fvsPatchField<scalar> &L_rhoPatch = L_rhoSurf_.boundaryField()[patchi];
+        const fvsPatchField<vector> &L_Upatch = L_Usurf_.boundaryField()[patchi];
+        const fvsPatchField<scalar> &L_lambdaPatch = L_lambdaSurf_.boundaryField()[patchi];
 
         // Obtain fixed value at boundary
         const fvPatchField<scalar> &rhoPatch = rhoVol_.boundaryField()[patchi];
@@ -593,88 +601,133 @@ void Foam::fvDVM::CalcFluxSurf()
                 // Local geometric information
                 const label own = pOwner[pFacei];
                 tensor frame = FramePatch[pFacei];
+                label ownOrder = round(cellOrderVol_[own]);
 
                 // Face variable
-                scalarField h(nXi(), 0.0), b(nXi(), 0.0);
+                scalarField h(nXi()), b(nXi());
                 vectorField dh(nXi(), vector(0, 0, 0)), db(nXi(), vector(0, 0, 0)); // Micro gradient in local frame
-                scalarField H_g(nXi(), 0.0), B_g(nXi(), 0.0);
+                scalarField Hg(nXi()), Bg(nXi());
                 vectorField ui(nXi());
 
-                scalar rho_w, incidence = 0.0, reflection = 0.0;
+                // Wall primary variables at interface
+                scalar rho_w;
                 vector U_w = frame & Upatch[pFacei]; // Macro velocity in local frame
                 scalar lambda_w = lambdaPatch[pFacei];
-                scalar rho_g = rhoVol()[own] / lambdaVol()[own] * lambda_w;
 
-                scalar tau = GetTau(rho_g, lambda_w);
-                scalar T3 = tau * (1.0 - exp(-dt / tau));
-                scalar T4 = -tau * dt * exp(-dt / tau) + tau * T3;
-                scalar T0 = dt - T3;
+                // Prim^L at interface
+                scalar rho_g = L_rhoPatch[pFacei];
+                vector U_g = frame & L_Upatch[pFacei]; // Macro velocity in local frame
+                scalar lambda_g = L_lambdaPatch[pFacei];
 
-                forAll(DV_, dvi)
+                // Calculate collision time and some time integration terms
+                scalar tau = GetTau(rho_g, lambda_g);
+                scalarField Mt = GetTimeIntegration(tau, dt);
+
+                // Get the incidence and reflection density flux
+                scalar incidence = 0.0, reflection = 0.0;
+                if (ownOrder == 2)
                 {
-                    DiscreteVelocityPoint &dv = DV_[dvi];
-                    const scalar &weight = dv.weight();
-                    const vector xii = frame & dv.xi(); // Micro velocity in local frame
-                    const scalar &vn = xii.x();
-                    ui[dvi] = xii;
+                    forAll(DV_, dvi)
+                    {
+                        DiscreteVelocityPoint &dv = DV_[dvi];
+                        const scalar &weight = dv.weight();
+                        const vector xii = frame & dv.xi(); // Micro velocity in local frame
+                        const scalar &vn = xii.x();
+                        ui[dvi] = xii;
 
-                    if (vn >= VSMALL) // Comming from own
-                    {
-                        h[dvi] = dv.hVol()[own] + (dv.hGradVol()[own] & (CfPatch[pFacei] - C[own]));
-                        b[dvi] = dv.bVol()[own] + (dv.bGradVol()[own] & (CfPatch[pFacei] - C[own]));
-                        dh[dvi] = frame & dv.hGradVol()[own];
-                        db[dvi] = frame & dv.bGradVol()[own];
-                        DiscreteMaxwell(H_g[dvi], B_g[dvi], rho_g, U_w, lambda_w, xii);
-                        incidence += weight * vn * (T0 * H_g[dvi] + T3 * h[dvi] - T4 * (xii & dh[dvi]));
+                        if (vn >= VSMALL) // Comming from own
+                        {
+                            h[dvi] = dv.hVol()[own] + (dv.hGradVol()[own] & (CfPatch[pFacei] - C[own]));
+                            b[dvi] = dv.bVol()[own] + (dv.bGradVol()[own] & (CfPatch[pFacei] - C[own]));
+                            dh[dvi] = frame & dv.hGradVol()[own];
+                            db[dvi] = frame & dv.bGradVol()[own];
+                            DiscreteMaxwell(Hg[dvi], Bg[dvi], rho_g, U_g, lambda_g, xii);
+                            incidence += weight * vn * (Mt[0] * Hg[dvi] + Mt[3] * h[dvi] - Mt[4] * (xii & dh[dvi]));
+                        }
+                        else // Comming form nei
+                        {
+                            reflection += dt * weight * vn * pow(sqrt(lambda_w / pi), D) * exp(-lambda_w * magSqr(U_w - xii));
+                        }
                     }
-                    else // Comming form nei
+                }
+                else
+                {
+                    forAll(DV_, dvi)
                     {
-                        reflection += dt * weight * vn * pow(sqrt(lambda_w / pi), D) * exp(-lambda_w * magSqr(U_w - xii));
+                        DiscreteVelocityPoint &dv = DV_[dvi];
+                        const scalar &weight = dv.weight();
+                        const vector xii = frame & dv.xi(); // Micro velocity in local frame
+                        const scalar &vn = xii.x();
+                        ui[dvi] = xii;
+
+                        if (vn >= VSMALL) // Comming from own
+                        {
+                            h[dvi] = dv.hVol()[own];
+                            b[dvi] = dv.bVol()[own];
+                            DiscreteMaxwell(Hg[dvi], Bg[dvi], rho_g, U_g, lambda_g, xii);
+                            incidence += weight * vn * (Mt[0] * Hg[dvi] + Mt[3] * h[dvi]);
+                        }
+                        else // Comming form nei
+                        {
+                            reflection += dt * weight * vn * pow(sqrt(lambda_w / pi), D) * exp(-lambda_w * magSqr(U_w - xii));
+                        }
                     }
                 }
                 rho_w = -incidence / reflection;
+                if (rho_w < 0.0)
+                    Info << "Error: negative wall density!" << tab << rho_w << tab << CfPatch[pFacei] << nl;
 
+                // Update the micro and macro flux, combined first and second order flux
+                scalar my_magSf = magSfPatch[pFacei];
                 forAll(DV_, dvi)
                 {
                     DiscreteVelocityPoint &dv = DV_[dvi];
                     const scalar &weight = dv.weight();
                     const vector &xii = ui[dvi];
                     const scalar &vn = xii.x();
+                    scalar hFlux, bFlux;
 
                     if (vn >= VSMALL) // Comming from own
                     {
-                        rhoFluxPatch[pFacei] += weight * vn * (T0 * H_g[dvi] + T3 * h[dvi] - T4 * (xii & dh[dvi]));
-                        rhoUfluxPatch[pFacei] += weight * vn * xii * (T0 * H_g[dvi] + T3 * h[dvi] - T4 * (xii & dh[dvi]));
-                        rhoEfluxPatch[pFacei] += 0.5 * weight * vn * (T0 * (magSqr(xii) * H_g[dvi] + B_g[dvi]) + T3 * (magSqr(xii) * h[dvi] + b[dvi]) - T4 * (magSqr(xii) * (xii & dh[dvi]) + (xii & db[dvi])));
-                        dv.UpdatehFlux().boundaryFieldRef()[patchi][pFacei] = vn * (T0 * H_g[dvi] + T3 * h[dvi] - T4 * (xii & dh[dvi])) * magSfPatch[pFacei];
-                        dv.UpdatebFlux().boundaryFieldRef()[patchi][pFacei] = vn * (T0 * B_g[dvi] + T3 * b[dvi] - T4 * (xii & db[dvi])) * magSfPatch[pFacei];
+                        hFlux = vn * (Mt[0] * Hg[dvi] + Mt[3] * h[dvi] - Mt[4] * (xii & dh[dvi])) * my_magSf;
+                        bFlux = vn * (Mt[0] * Bg[dvi] + Mt[3] * b[dvi] - Mt[4] * (xii & db[dvi])) * my_magSf;
+
+                        dv.UpdatehFlux().boundaryFieldRef()[patchi][pFacei] = hFlux;
+                        dv.UpdatebFlux().boundaryFieldRef()[patchi][pFacei] = bFlux;
                     }
                     else // Comming form nei
                     {
                         scalar H_w, B_w;
                         DiscreteMaxwell(H_w, B_w, rho_w, U_w, lambda_w, xii);
-                        scalar temp = dt * weight * vn;
-                        rhoFluxPatch[pFacei] += temp * H_w;
-                        rhoUfluxPatch[pFacei] += temp * xii * H_w;
-                        rhoEfluxPatch[pFacei] += temp * 0.5 * (magSqr(xii) * H_w + B_w);
-                        dv.UpdatehFlux().boundaryFieldRef()[patchi][pFacei] = dt * vn * H_w * magSfPatch[pFacei];
-                        dv.UpdatebFlux().boundaryFieldRef()[patchi][pFacei] = dt * vn * B_w * magSfPatch[pFacei];
+                        scalar temp = dt * vn * my_magSf;
+                        hFlux = temp * H_w;
+                        bFlux = temp * B_w;
+
+                        dv.UpdatehFlux().boundaryFieldRef()[patchi][pFacei] = hFlux;
+                        dv.UpdatebFlux().boundaryFieldRef()[patchi][pFacei] = bFlux;
                     }
+                    scalar tmpwh = weight * hFlux;
+                    scalar tmpwb = weight * bFlux;
+
+                    rhoFluxPatch[pFacei] += tmpwh;
+                    rhoUfluxPatch[pFacei] += xii * tmpwh;
+                    rhoEfluxPatch[pFacei] += magSqr(xii) * tmpwh + tmpwb; // lack of 0.5, will locate after the loop
                 }
+                rhoEfluxPatch[pFacei] = 0.5 * rhoEfluxPatch[pFacei]; // Add the 0.5 back in energy flux
+
                 if (time_.outputTime())
                 {
                     //- Wall heat flux and stress, only defined at wall boundary faces
                     //- meanningless at other kind of faces
                     scalar theta_ = -atan2(CfPatch[pFacei].y(), CfPatch[pFacei].x()) * 180.0 / pi + 180;
-                    scalar qWall_ = rhoEfluxPatch[pFacei] / dt;
-                    scalar normalStressWall_ = rhoUfluxPatch[pFacei].x() / dt;
-                    scalar shearStressWall_ = (rhoUfluxPatch[pFacei].y() + rhoUfluxPatch[pFacei].z()) / dt;
+                    scalar normalizedFactor = dt * my_magSf;
+                    scalar qWall_ = rhoEfluxPatch[pFacei] / normalizedFactor;
+                    scalar normalStressWall_ = rhoUfluxPatch[pFacei].x() / normalizedFactor;
+                    scalar shearStressWall_ = (rhoUfluxPatch[pFacei].y() + rhoUfluxPatch[pFacei].z()) / normalizedFactor;
                     wallFile << theta_ << tab << qWall_ << tab << normalStressWall_ << tab << shearStressWall_ << endl;
                     wallFile.flush();
                 }
-                rhoFluxPatch[pFacei] = rhoFluxPatch[pFacei] * magSfPatch[pFacei];
-                rhoUfluxPatch[pFacei] = (frame.T() & rhoUfluxPatch[pFacei]) * magSfPatch[pFacei];
-                rhoEfluxPatch[pFacei] = rhoEfluxPatch[pFacei] * magSfPatch[pFacei];
+                rhoUfluxPatch[pFacei] = frame.T() & rhoUfluxPatch[pFacei]; // Momentum flux in global frame
             }
         }
         else if (type == "fixedValue")
@@ -1400,10 +1453,15 @@ label Foam::fvDVM::CheckInterfacePrim(const scalar &rho, const vector &rhoU, con
     return orderGlobal;
 }
 
-scalarField Foam::fvDVM::GetTimeIntegration(const scalarField &prim, const scalar dt, const scalarField &primL, const scalarField &primR)
+scalarField Foam::fvDVM::GetTimeIntegration(const scalarField &prim, const scalar &dt, const scalarField &primL, const scalarField &primR)
+{
+    scalar tau = GetTau(prim[0], prim[4]) + artificialViscosity(primL, primR) * dt; // Add additional dissipation in case of strong shock
+    return GetTimeIntegration(tau, dt);
+}
+
+scalarField Foam::fvDVM::GetTimeIntegration(const scalar &tau, const scalar &dt)
 {
     scalarField Mt(5);
-    scalar tau = GetTau(prim[0], prim[4]) + artificialViscosity(primL, primR) * dt; // Add additional dissipation in case of strong shock
 
     scalar rt = tau / dt;
     if (rt > 1.0e3)
