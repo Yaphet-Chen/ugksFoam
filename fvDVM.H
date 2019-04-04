@@ -106,6 +106,9 @@ class fvDVM
     //- Ratio of specific heat
     const scalar Gamma_;
 
+    //- indicator of Global Order, second order by default
+    label orderGlobal;
+
     //- List of pointers to discrete velocities
     PtrList<DiscreteVelocityPoint> DV_;
 
@@ -139,6 +142,18 @@ class fvDVM
     //- Local coordinate at each face
     surfaceTensorField LocalFrameSurf_;
 
+    //- rho left and rho right at surface
+    surfaceScalarField L_rhoSurf_, R_rhoSurf_;
+
+    //- U left and rho right at surface
+    surfaceVectorField L_Usurf_, R_Usurf_;
+
+    //- lambda left and lambda right at surface
+    surfaceScalarField L_lambdaSurf_, R_lambdaSurf_;
+
+    //- Cell order of reconstruction
+    volScalarField cellOrderVol_;
+
     // Private Member Functions
 
     //- Initialise
@@ -156,6 +171,10 @@ class fvDVM
     // Reconstruct the gradient of initial distribution function
     void Reconstruction();
 
+    // Check if the reconstruction is reliable and assign the primL and primR at interface
+    // If the reconstructed density or temperature is negative, set the cell order to first order
+    void CheckReconstruction();
+
     // Macro and micro flux calculation
     void CalcFluxSurf();
 
@@ -165,16 +184,17 @@ class fvDVM
     void PrimToConserved(scalar &rhoP, vector &U, scalar &lambda, scalar &rho, vector &rhoU, scalar &rhoE);
     void ConservedToPrim(scalar &rhoC, vector &rhoU, scalar &rhoE, scalar &rho, vector &U, scalar &lambda);
     scalarField ConservedToPrim(scalar rhoC, vector rhoU, scalar rhoE);
-    scalarField VariablesToField(scalar head, vector V, scalar tail);
-    void FieldToVariables(scalarField s, scalar &head, vector &V, scalar &tail);
-    void MicroSlope(scalar &srho, vector &srhoU, scalar &srhoE, scalar &rho, vector &U, scalar &lambda, scalar &grho, vector &gU, scalar &glambda);
-    scalarField MicroSlope(scalarField &slope, scalarField &prim);
+    label ConservedToPrim(scalar rhoC, vector rhoU, scalar rhoE, scalarField &prim);
+    scalarField VariablesToField(const scalar &head, const vector &V, const scalar &tail);
+    void FieldToVariables(const scalarField &s, scalar &head, vector &V, scalar &tail);
+    void MicroSlope(const scalar &srho, const vector &srhoU, const scalar &srhoE, const scalar &rho, const vector &U, const scalar &lambda, scalar &grho, vector &gU, scalar &glambda);
+    scalarField MicroSlope(const scalarField &slope, const scalarField &prim);
     void CalcMoment(const scalarField &prim, scalarField &Mu, scalarField &Mv1, scalarField &Mv2,
                     scalarField &Mxi, scalarField &MuL, scalarField &MuR);
-    scalarField Moment_uv1v2xi(scalarField &Mu, scalarField &Mv1, scalarField &Mv2, scalarField &Mxi,
+    scalarField Moment_uv1v2xi(const scalarField &Mu, const scalarField &Mv1, const scalarField &Mv2, const scalarField &Mxi,
                                label alpha, label beta, label gamma, label delta);
-    scalarField Moment_auv1v2xi(scalarField &s, scalarField &Mu, scalarField &Mv1, scalarField &Mv2, scalarField &Mxi,
-                                label alpha, label beta, label gamma);
+    scalarField Moment_auv1v2xi(const scalarField &s, const scalarField &Mu, const scalarField &Mv1, const scalarField &Mv2,
+                                const scalarField &Mxi, label alpha, label beta, label gamma);
     scalar GetTau(const scalar &rho, const scalar &lambda);
 
     void equilibriumShakhov(
@@ -206,6 +226,42 @@ class fvDVM
         const vector &xi);
 
     tmp<scalarField> getSoundSpeed();
+
+    label CheckInterfacePrim(const scalar &rho, const vector &rhoU, const scalar &rhoE, const label &celli, const vector d,
+                             scalar &rho_face, vector &U_face, scalar &lambda_face);
+    scalarField GetTimeIntegration(const scalarField &prim, const scalar dt, const scalarField &primL, const scalarField &primR);
+    scalar artificialViscosity(const scalarField &primL, const scalarField &primR);
+    void moment_accumulator_first(scalar &rho, vector &rhoU, scalar &rhoE, scalar &h, scalar &b, vector &u, const scalar &hl, const scalar &bl, const tensor &frame, const vector &xi, const scalar &weight, const scalar &hr, const scalar &br);
+    void moment_accumulator_second(scalar &rho, vector &rhoU, scalar &rhoE, scalar &h, vector &dh, scalar &b, vector &db, vector &u,
+                                   const scalar &hl, const vector &dhl, const scalar &bl, const vector &dbl, const vector &dl,
+                                   const tensor &frame, const vector &xi, const scalar &weight,
+                                   const scalar &hr, const vector &dhr, const scalar &br, const vector &dbr, const vector &dr);
+    void moment_accumulator_second(scalar &rho, vector &rhoU, scalar &rhoE, scalar &h, vector &dh, scalar &b, vector &db, vector &u,
+                                   const scalar &hl, const vector &dhl, const scalar &bl, const vector &dbl, const vector &dl,
+                                   const tensor &frame, const vector &xi, const scalar &weight,
+                                   const scalar &hr, const scalar &br);
+    void moment_accumulator_second(scalar &rho, vector &rhoU, scalar &rhoE, scalar &h, vector &dh, scalar &b, vector &db, vector &u,
+                                   const scalar &hl, const scalar &bl,
+                                   const tensor &frame, const vector &xi, const scalar &weight,
+                                   const scalar &hr, const vector &dhr, const scalar &br, const vector &dbr, const vector &dr);
+    void moment_accumulator(scalar &rho, vector &rhoU, scalar &rhoE, const scalar &h, const scalar &b, const vector &u, const scalar &weight);
+    void calc_g0_slope(const scalarField &primL, const vector &rhoGrad_L, const tensor &rhoUgrad_L, const vector &rhoEgrad_L,
+                       const scalarField &prim, const tensor &frame, scalarField &aBar, scalarField &bBar, scalarField &cBar, scalarField &aT,
+                       const scalarField &primR, const vector &rhoGrad_R, const tensor &rhoUgrad_R, const vector &rhoEgrad_R);
+    void calc_g0_slope(const scalarField &primL, const vector &rhoGrad_L, const tensor &rhoUgrad_L, const vector &rhoEgrad_L,
+                       const scalarField &prim, const tensor &frame, scalarField &aBar, scalarField &bBar, scalarField &cBar, scalarField &aT);
+    void calc_g0_slope(const scalarField &prim, const tensor &frame, scalarField &aBar, scalarField &bBar, scalarField &cBar, scalarField &aT,
+                       const scalarField &primR, const vector &rhoGrad_R, const tensor &rhoUgrad_R, const vector &rhoEgrad_R);
+    void get_abcT_slope(const scalarField &prim, scalarField &aBar, scalarField &bBar, scalarField &cBar, scalarField &aT,
+                        const scalarField &N, const scalarField &T1, const scalarField &T2);
+    vector GetHeatFlux(const vector &U, const PtrList<DiscreteVelocityPoint> &DV_, const scalarField &h, const scalarField &b, const vectorField &u);
+    void flux_calculator_second(const scalar &hi, const vector &dhi, const scalar &bi, const vector &dbi, const vector &xii,
+                                const vector &qf, const scalar &weight, const scalar &magSf, const scalarField &Mt,
+                                const scalarField &prim, const scalarField &aBar, const scalarField &bBar, const scalarField &cBar, const scalarField &aT,
+                                scalar &hFlux, scalar &bFlux, scalar &rhoFlux, vector &rhoUflux, scalar &rhoEflux);
+    void flux_calculator_first(const scalar &hi, const scalar &bi, const vector &xii,
+                               const vector &qf, const scalar &weight, const scalar &magSf, const scalarField &Mt, const scalarField &prim,
+                               scalar &hFlux, scalar &bFlux, scalar &rhoFlux, vector &rhoUflux, scalar &rhoEflux);
 
     //- Disallow default bitwise copy construct
     fvDVM(const fvDVM &);

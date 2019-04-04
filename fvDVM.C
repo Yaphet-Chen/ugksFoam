@@ -281,6 +281,104 @@ void Foam::fvDVM::Reconstruction()
     rhoEgradVol_.correctBoundaryConditions();
 }
 
+/*---------------------------------------------------------------------------*\
+ * @Brief       : Reconstruct primL primR at interface in global frame
+ *                according to global order with blow-up guard
+\*---------------------------------------------------------------------------*/
+void Foam::fvDVM::CheckReconstruction()
+{
+    // Global geometric information
+    const cellList &cells = mesh_.cells();
+    const labelUList &owner = mesh_.faceOwner();
+    const surfaceVectorField &Cf = mesh_.Cf();
+    const volVectorField &C = mesh_.C();
+
+    forAll(cells, celli)
+    {
+        // Auxiliary variables
+        scalar rho;
+        vector rhoU;
+        scalar rhoE;
+        label myOrder = orderGlobal;
+
+        // Cell-faces information
+        const cell myface = cells[celli];
+
+        // Obtain conVars
+        PrimToConserved(rhoVol_[celli], Uvol_[celli], lambdaVol_[celli], rho, rhoU, rhoE);
+
+        forAll(myface, index)
+        {
+            if (myOrder == 2)
+            {
+                const label facei = myface[index];
+                const label own = owner[facei];
+
+                // This gives you the patch ID for a face. If the face is internal, you get -1
+                const label patchID = mesh_.boundaryMesh().whichPatch(facei);
+                if (patchID == -1)
+                { // Internal
+                    const vector d = Cf[facei] - C[celli];
+                    if (own == celli)
+                    {
+                        myOrder = CheckInterfacePrim(rho, rhoU, rhoE, celli, d,
+                                                     L_rhoSurf_[facei], L_Usurf_[facei], L_lambdaSurf_[facei]);
+                    }
+                    else
+                    {
+                        myOrder = CheckInterfacePrim(rho, rhoU, rhoE, celli, d,
+                                                     R_rhoSurf_[facei], R_Usurf_[facei], R_lambdaSurf_[facei]);
+                    }
+                }
+                else if (mesh_.boundaryMesh().types()[patchID] != "empty") // Boundary: exclude empty cases
+                {
+                    const label faceID = mesh_.boundaryMesh()[patchID].whichFace(facei);
+                    const vector d = Cf.boundaryField()[patchID][faceID] - C[celli];
+                    myOrder = CheckInterfacePrim(rho, rhoU, rhoE, celli, d,
+                                                 L_rhoSurf_.boundaryFieldRef()[patchID][faceID],
+                                                 L_Usurf_.boundaryFieldRef()[patchID][faceID],
+                                                 L_lambdaSurf_.boundaryFieldRef()[patchID][faceID]);
+                }
+            }
+        }
+
+        if (myOrder != 2)
+        {
+            forAll(myface, index)
+            {
+                const label facei = myface[index];
+                const label own = owner[facei];
+
+                // This gives you the patch ID for a face. If the face is internal, you get -1
+                const label patchID = mesh_.boundaryMesh().whichPatch(facei);
+                if (patchID == -1)
+                { // Internal
+                    if (own == celli)
+                    {
+                        L_rhoSurf_[facei] = rhoVol_[celli];
+                        L_Usurf_[facei] = Uvol_[celli];
+                        L_lambdaSurf_[facei] = lambdaVol_[celli];
+                    }
+                    else
+                    {
+                        R_rhoSurf_[facei] = rhoVol_[celli];
+                        R_Usurf_[facei] = Uvol_[celli];
+                        R_lambdaSurf_[facei] = lambdaVol_[celli];
+                    }
+                }
+                else if (mesh_.boundaryMesh().types()[patchID] != "empty")
+                { // Boundary: exclude empty cases
+                    const label faceID = mesh_.boundaryMesh()[patchID].whichFace(facei);
+                    L_rhoSurf_.boundaryFieldRef()[patchID][faceID] = rhoVol_[celli];
+                    L_Usurf_.boundaryFieldRef()[patchID][faceID] = Uvol_[celli];
+                    L_lambdaSurf_.boundaryFieldRef()[patchID][faceID] = lambdaVol_[celli];
+                }
+            }
+        }
+        cellOrderVol_[celli] = static_cast<scalar>(myOrder);
+    }
+}
+
 void Foam::fvDVM::CalcFluxSurf()
 {
     // Init Flux to zero
@@ -304,165 +402,139 @@ void Foam::fvDVM::CalcFluxSurf()
         label own = owner[facei];
         label nei = neighbour[facei];
         tensor frame = localFrame[facei];
+        label ownOrder = round(cellOrderVol_[own]);
+        label neiOrder = round(cellOrderVol_[nei]);
+        label faceOrder = orderGlobal;
 
         // Face variable
         scalarField h(nXi()), b(nXi());
         vectorField dh(nXi()), db(nXi()), ui(nXi()); // Micro gradient and velocity in local frame
-        scalar lambda, rho, rhoL, rhoR, rhoE, rhoEL, rhoER;
-        vector U, rhoU, rhoUL, rhoUR;
+        scalar lambda, rho, rhoE;
+        vector U, rhoU;
 
-        // Gradient and micro slope
-        scalar aRho, bRho, cRho, aTrho;
-        vector aU, bU, cU, aTU;
-        scalar aLambda, bLambda, cLambda, aTlambda;
+        // Macro slope of g in local frame and time coefficients
+        scalarField aBar(5), bBar(5), cBar(5), aT(5), Mt(5);
 
-        // Moment
-        scalarField Mu(7), MuL(7), MuR(7), Mv1(6), Mv2(6), Mxi(3);
-        scalarField Mu_L(7), MuL_L(7), MuR_L(7), Mv1_L(6), Mv2_L(6), Mxi_L(3);
-        scalarField Mu_R(7), MuL_R(7), MuR_R(7), Mv1_R(6), Mv2_R(6), Mxi_R(3);
-        scalarField M0u(5), Mau(5), Mbv1(5), Mcv2(5), MaTu(5), Mt(5);
-
-        PrimToConserved(rhoVol_[own], Uvol_[own], lambdaVol_[own], rhoL, rhoUL, rhoEL); // Left cell-centered conservered value
-        PrimToConserved(rhoVol_[nei], Uvol_[nei], lambdaVol_[nei], rhoR, rhoUR, rhoER); // Right cell-centered conservered value
-
-        // W^L in local frame at cell interface
-        rhoL = rhoL + (rhoGradVol_[own] & (Cf[facei] - C[own]));
-        rhoUL = frame & (rhoUL + (rhoUgradVol_[own].T() & (Cf[facei] - C[own])));
-        rhoEL = rhoEL + (rhoEgradVol_[own] & (Cf[facei] - C[own]));
-        scalarField primL = ConservedToPrim(rhoL, rhoUL, rhoEL);
-        CalcMoment(primL, Mu_L, Mv1_L, Mv2_L, Mxi_L, MuL_L, MuR_L);
-
-        // W^R in local frame at cell interface
-        rhoR = rhoR + (rhoGradVol_[nei] & (Cf[facei] - C[nei]));
-        rhoUR = frame & (rhoUR + (rhoUgradVol_[nei].T() & (Cf[facei] - C[nei])));
-        rhoER = rhoER + (rhoEgradVol_[nei] & (Cf[facei] - C[nei]));
-        scalarField primR = ConservedToPrim(rhoR, rhoUR, rhoER);
-        CalcMoment(primR, Mu_R, Mv1_R, Mv2_R, Mxi_R, MuL_R, MuR_R);
+        // Prim^L and Prim^R in local frame at cell interface
+        scalarField primL = VariablesToField(L_rhoSurf_[facei], frame & L_Usurf_[facei], L_lambdaSurf_[facei]);
+        scalarField primR = VariablesToField(R_rhoSurf_[facei], frame & R_Usurf_[facei], R_lambdaSurf_[facei]);
 
         // Obtain the conserved variables in local frame at cell interface by collision
-        scalarField conVars(primL[0] * Moment_uv1v2xi(MuL_L, Mv1_L, Mv2_L, Mxi_L, 0, 0, 0, 0) +
-                            primR[0] * Moment_uv1v2xi(MuR_R, Mv1_R, Mv2_R, Mxi_R, 0, 0, 0, 0));
-        FieldToVariables(conVars, rho, rhoU, rhoE);
-
-        // Obtain the normal and tangential gradient of conserved variables in local frame by collision
-        vector tempVector1 = frame & rhoGradVol_[own];
-        tensor tempTensor = frame & rhoUgradVol_[own] & frame.T();
-        vector tempVector2 = frame & rhoEgradVol_[own];
-        scalarField N = VariablesToField(tempVector1.x(), tempTensor.x(), tempVector2.x());
-        scalarField T1 = VariablesToField(tempVector1.y(), tempTensor.y(), tempVector2.y());
-        scalarField T2 = VariablesToField(tempVector1.z(), tempTensor.z(), tempVector2.z());
-        scalarField aL = MicroSlope(N, primL);
-        scalarField bL = MicroSlope(T1, primL);
-        scalarField cL = MicroSlope(T2, primL);
-
-        tempVector1 = frame & rhoGradVol_[nei];
-        tempTensor = frame & rhoUgradVol_[nei] & frame.T();
-        tempVector2 = frame & rhoEgradVol_[nei];
-        N = VariablesToField(tempVector1.x(), tempTensor.x(), tempVector2.x());
-        T1 = VariablesToField(tempVector1.y(), tempTensor.y(), tempVector2.y());
-        T2 = VariablesToField(tempVector1.z(), tempTensor.z(), tempVector2.z());
-        scalarField aR = MicroSlope(N, primR);
-        scalarField bR = MicroSlope(T1, primR);
-        scalarField cR = MicroSlope(T2, primR);
-
-        N = primL[0] * Moment_auv1v2xi(aL, MuL_L, Mv1_L, Mv2_L, Mxi_L, 0, 0, 0) + primR[0] * Moment_auv1v2xi(aR, MuR_R, Mv1_R, Mv2_R, Mxi_R, 0, 0, 0);
-        T1 = primL[0] * Moment_auv1v2xi(bL, MuL_L, Mv1_L, Mv2_L, Mxi_L, 0, 0, 0) + primR[0] * Moment_auv1v2xi(bR, MuR_R, Mv1_R, Mv2_R, Mxi_R, 0, 0, 0);
-        T2 = primL[0] * Moment_auv1v2xi(cL, MuL_L, Mv1_L, Mv2_L, Mxi_L, 0, 0, 0) + primR[0] * Moment_auv1v2xi(cR, MuR_R, Mv1_R, Mv2_R, Mxi_R, 0, 0, 0);
-
-        // Calculate aBar, bBar, cBar and related moment
-        scalarField prim = ConservedToPrim(rho, rhoU, rhoE);
-        scalarField aBar = MicroSlope(N, prim);
-        scalarField bBar = MicroSlope(T1, prim);
-        scalarField cBar = MicroSlope(T2, prim);
-        FieldToVariables(aBar, aRho, aU, aLambda);
-        FieldToVariables(bBar, bRho, bU, bLambda);
-        FieldToVariables(cBar, cRho, cU, cLambda);
-
-        CalcMoment(prim, Mu, Mv1, Mv2, Mxi, MuL, MuR);
-        Mau = Moment_auv1v2xi(aBar, Mu, Mv1, Mv2, Mxi, 1, 0, 0);
-        Mbv1 = Moment_auv1v2xi(bBar, Mu, Mv1, Mv2, Mxi, 0, 1, 0);
-        Mcv2 = Moment_auv1v2xi(cBar, Mu, Mv1, Mv2, Mxi, 0, 0, 1);
-        scalarField sw(-rho * (Mau + Mbv1 + Mcv2));
-        scalarField aT = MicroSlope(sw, prim);
-        FieldToVariables(aT, aTrho, aTU, aTlambda);
-
-        // Calculate collision time and some time integration terms
-        FieldToVariables(prim, rho, U, lambda);
-        scalar tau = GetTau(rho, lambda) + std::abs(primL[0] / primL[4] - primR[0] / primR[4]) / std::abs(primL[0] / primL[4] + primR[0] / primR[4]) * dt; // Add additional dissipation in case of strong shock
-
-        Mt[3] = tau * (1.0 - exp(-dt / tau));
-        Mt[4] = -tau * dt * exp(-dt / tau) + tau * Mt[3];
-        Mt[0] = dt - Mt[3];
-        Mt[1] = -tau * Mt[0] + Mt[4];
-        Mt[2] = 0.5 * dt * dt - tau * Mt[0];
-
-        M0u = Moment_uv1v2xi(Mu, Mv1, Mv2, Mxi, 1, 0, 0, 0);
-        Mau = Moment_auv1v2xi(aBar, Mu, Mv1, Mv2, Mxi, 2, 0, 0);
-        Mbv1 = Moment_auv1v2xi(bBar, Mu, Mv1, Mv2, Mxi, 1, 1, 0);
-        Mcv2 = Moment_auv1v2xi(cBar, Mu, Mv1, Mv2, Mxi, 1, 0, 1);
-        MaTu = Moment_auv1v2xi(aT, Mu, Mv1, Mv2, Mxi, 1, 0, 0);
-
-        scalarField flux(rho * (Mt[0] * M0u + Mt[1] * (Mau + Mbv1 + Mcv2) + Mt[2] * MaTu));
-        FieldToVariables(flux, rhoFluxSurf_[facei], rhoUfluxSurf_[facei], rhoEfluxSurf_[facei]);
-
-        vector qf = vector(0, 0, 0);
-        forAll(DV_, dvi)
+        scalarField prim(5);
+        if (faceOrder == 2)
         {
-            DiscreteVelocityPoint &dv = DV_[dvi];
-            const vector xii = frame & dv.xi(); // Micro velocity in local frame
-            ui[dvi] = xii;
-
-            if (xii.x() >= VSMALL) // Comming from own
+            rho = 0.0;
+            rhoU = vector(0, 0, 0);
+            rhoE = 0.0;
+            if (ownOrder == 2 && neiOrder == 2)
             {
-                h[dvi] = dv.hVol()[own] + (dv.hGradVol()[own] & (Cf[facei] - C[own]));
-                b[dvi] = dv.bVol()[own] + (dv.bGradVol()[own] & (Cf[facei] - C[own]));
-                dh[dvi] = frame & dv.hGradVol()[own];
-                db[dvi] = frame & dv.bGradVol()[own];
+                vector dl = Cf[facei] - C[own];
+                vector dr = Cf[facei] - C[nei];
+                forAll(DV_, dvi)
+                {
+                    DiscreteVelocityPoint &dv = DV_[dvi];
+                    moment_accumulator_second(rho, rhoU, rhoE, h[dvi], dh[dvi], b[dvi], db[dvi], ui[dvi],
+                                              dv.hVol()[own], dv.hGradVol()[own], dv.bVol()[own], dv.bGradVol()[own], dl,
+                                              frame, dv.xi(), dv.weight(),
+                                              dv.hVol()[nei], dv.hGradVol()[nei], dv.bVol()[nei], dv.bGradVol()[nei], dr);
+                }
+                faceOrder = ConservedToPrim(rho, rhoU, rhoE, prim);
+                if (faceOrder == 2)
+                {
+                    calc_g0_slope(primL, rhoGradVol_[own], rhoUgradVol_[own], rhoEgradVol_[own],
+                                  prim, frame, aBar, bBar, cBar, aT,
+                                  primR, rhoGradVol_[nei], rhoUgradVol_[nei], rhoEgradVol_[nei]);
+                }
             }
-            else if (xii.x() < -VSMALL) // Comming form nei
+            else if (ownOrder == 2 && neiOrder != 2)
             {
-                h[dvi] = dv.hVol()[nei] + (dv.hGradVol()[nei] & (Cf[facei] - C[nei]));
-                b[dvi] = dv.bVol()[nei] + (dv.bGradVol()[nei] & (Cf[facei] - C[nei]));
-                dh[dvi] = frame & dv.hGradVol()[nei];
-                db[dvi] = frame & dv.bGradVol()[nei];
+                vector dl = Cf[facei] - C[own];
+                forAll(DV_, dvi)
+                {
+                    DiscreteVelocityPoint &dv = DV_[dvi];
+                    moment_accumulator_second(rho, rhoU, rhoE, h[dvi], dh[dvi], b[dvi], db[dvi], ui[dvi],
+                                              dv.hVol()[own], dv.hGradVol()[own], dv.bVol()[own], dv.bGradVol()[own], dl,
+                                              frame, dv.xi(), dv.weight(),
+                                              dv.hVol()[nei], dv.bVol()[nei]);
+                }
+                faceOrder = ConservedToPrim(rho, rhoU, rhoE, prim);
+                if (faceOrder == 2)
+                {
+                    calc_g0_slope(primL, rhoGradVol_[own], rhoUgradVol_[own], rhoEgradVol_[own],
+                                  prim, frame, aBar, bBar, cBar, aT);
+                }
+            }
+            else if (ownOrder != 2 && neiOrder == 2)
+            {
+                vector dr = Cf[facei] - C[nei];
+                forAll(DV_, dvi)
+                {
+                    DiscreteVelocityPoint &dv = DV_[dvi];
+                    moment_accumulator_second(rho, rhoU, rhoE, h[dvi], dh[dvi], b[dvi], db[dvi], ui[dvi],
+                                              dv.hVol()[own], dv.bVol()[own],
+                                              frame, dv.xi(), dv.weight(),
+                                              dv.hVol()[nei], dv.hGradVol()[nei], dv.bVol()[nei], dv.bGradVol()[nei], dr);
+                }
+                faceOrder = ConservedToPrim(rho, rhoU, rhoE, prim);
+                if (faceOrder == 2)
+                {
+                    calc_g0_slope(prim, frame, aBar, bBar, cBar, aT,
+                                  primR, rhoGradVol_[nei], rhoUgradVol_[nei], rhoEgradVol_[nei]);
+                }
             }
             else
             {
-                h[dvi] = 0.5 * (dv.hVol()[own] + (dv.hGradVol()[own] & (Cf[facei] - C[own])) + dv.hVol()[nei] + (dv.hGradVol()[nei] & (Cf[facei] - C[nei])));
-                b[dvi] = 0.5 * (dv.bVol()[own] + (dv.bGradVol()[own] & (Cf[facei] - C[own])) + dv.bVol()[nei] + (dv.bGradVol()[nei] & (Cf[facei] - C[nei])));
-                dh[dvi] = 0.5 * frame & (dv.hGradVol()[own] + dv.hGradVol()[nei]);
-                db[dvi] = 0.5 * frame & (dv.bGradVol()[own] + dv.bGradVol()[nei]);
+                faceOrder = 1;
             }
-            vector c = ui[dvi] - U;
-            qf += 0.5 * dv.weight() * c * (magSqr(c) * h[dvi] + b[dvi]);
         }
-
-        forAll(DV_, dvi)
+        if (faceOrder != 2)
         {
-            DiscreteVelocityPoint &dv = DV_[dvi];
-            const vector &xii = ui[dvi];
-            const scalar &vn = xii.x();
-            const scalar &weight = dv.weight();
-            const scalar &hi = h[dvi];
-            const scalar &bi = b[dvi];
-            const vector &dhi = dh[dvi];
-            const vector &dbi = db[dvi];
-
-            scalar H0, B0, Hplus, Bplus;
-            DiscreteMaxwell(H0, B0, rho, U, lambda, xii);
-            ShakhovPart(H0, B0, rho, U, lambda, qf, xii, Hplus, Bplus);
-
-            rhoFluxSurf_[facei] += weight * vn * (Mt[0] * Hplus + Mt[3] * hi - Mt[4] * (xii & dhi));
-            rhoUfluxSurf_[facei] += weight * vn * xii * (Mt[0] * Hplus + Mt[3] * hi - Mt[4] * (xii & dhi));
-            rhoEfluxSurf_[facei] += 0.5 * weight * vn * (Mt[0] * (magSqr(xii) * Hplus + Bplus) + Mt[3] * (magSqr(xii) * hi + bi) - Mt[4] * (magSqr(xii) * (xii & dhi) + (xii & dbi)));
-
-            dv.UpdatehFlux()[facei] = vn * (Mt[0] * (H0 + Hplus) + Mt[1] * (xii.x() * (aRho * H0 + (aU & xii) * H0 + 0.5 * aLambda * (magSqr(xii) * H0 + B0)) + xii.y() * (bRho * H0 + (bU & xii) * H0 + 0.5 * bLambda * (magSqr(xii) * H0 + B0)) + xii.z() * (cRho * H0 + (cU & xii) * H0 + 0.5 * cLambda * (magSqr(xii) * H0 + B0))) + Mt[2] * (aTrho * H0 + (aTU & xii) * H0 + 0.5 * aTlambda * (magSqr(xii) * H0 + B0)) + Mt[3] * hi - Mt[4] * (xii & dhi)) * magSf[facei];
-
-            dv.UpdatebFlux()[facei] = vn * (Mt[0] * (B0 + Bplus) + Mt[1] * (xii.x() * (aRho * B0 + (aU & xii) * B0 + 0.5 * aLambda * (magSqr(xii) * B0 + Mxi[2] * H0)) + xii.y() * (bRho * B0 + (bU & xii) * B0 + 0.5 * bLambda * (magSqr(xii) * B0 + Mxi[2] * H0)) + xii.z() * (cRho * B0 + (cU & xii) * B0 + 0.5 * cLambda * (magSqr(xii) * B0 + Mxi[2] * H0))) + Mt[2] * (aTrho * B0 + (aTU & xii) * B0 + 0.5 * aTlambda * (magSqr(xii) * B0 + Mxi[2] * H0)) + Mt[3] * bi - Mt[4] * (xii & dbi)) * magSf[facei];
+            rho = 0.0;
+            rhoU = vector(0, 0, 0);
+            rhoE = 0.0;
+            forAll(DV_, dvi)
+            {
+                DiscreteVelocityPoint &dv = DV_[dvi];
+                moment_accumulator_first(rho, rhoU, rhoE, h[dvi], b[dvi], ui[dvi],
+                                         dv.hVol()[own], dv.bVol()[own],
+                                         frame, dv.xi(), dv.weight(),
+                                         dv.hVol()[nei], dv.bVol()[nei]);
+            }
+            prim = ConservedToPrim(rho, rhoU, rhoE);
+            if (prim[0] < SMALL || prim[4] < SMALL)
+                Info << "moment_accumulator_first failed!" << nl;
         }
-        rhoFluxSurf_[facei] = rhoFluxSurf_[facei] * magSf[facei];
-        rhoUfluxSurf_[facei] = (frame.T() & rhoUfluxSurf_[facei]) * magSf[facei];
-        rhoEfluxSurf_[facei] = rhoEfluxSurf_[facei] * magSf[facei];
+
+        // Calculate collision time and some time integration terms
+        Mt = GetTimeIntegration(prim, dt, primL, primR);
+        FieldToVariables(prim, rho, U, lambda);
+        vector qf = GetHeatFlux(U, DV_, h, b, ui);
+
+        if (faceOrder == 2)
+        {
+            forAll(DV_, dvi)
+            {
+                DiscreteVelocityPoint &dv = DV_[dvi];
+                flux_calculator_second(h[dvi], dh[dvi], b[dvi], db[dvi], ui[dvi],
+                                       qf, DV_[dvi].weight(), magSf[facei], Mt,
+                                       prim, aBar, bBar, cBar, aT,
+                                       dv.UpdatehFlux()[facei], dv.UpdatebFlux()[facei],
+                                       rhoFluxSurf_[facei], rhoUfluxSurf_[facei], rhoEfluxSurf_[facei]);
+            }
+        }
+        else
+        {
+            forAll(DV_, dvi)
+            {
+                DiscreteVelocityPoint &dv = DV_[dvi];
+                flux_calculator_first(h[dvi], b[dvi], ui[dvi],
+                                      qf, DV_[dvi].weight(), magSf[facei], Mt, prim,
+                                      dv.UpdatehFlux()[facei], dv.UpdatebFlux()[facei],
+                                      rhoFluxSurf_[facei], rhoUfluxSurf_[facei], rhoEfluxSurf_[facei]);
+            }
+        }
+        rhoUfluxSurf_[facei] = frame.T() & rhoUfluxSurf_[facei]; // Momentum flux in global frame
+        rhoEfluxSurf_[facei] = 0.5 * rhoEfluxSurf_[facei];       // add the 0.5 back
     }
 
     // boundary faces
@@ -997,11 +1069,11 @@ void Foam::fvDVM::Update()
         PrimToConserved(rhoOld, Uold, lambdaOld, rho, rhoU, rhoE);
 
         // Cell-faces information
-        const cell mycell = cells[celli];
+        const cell myface = cells[celli];
         const scalar V = Vol[celli];
-        forAll(mycell, index)
+        forAll(myface, index)
         {
-            const label facei = mycell[index];
+            const label facei = myface[index];
             const label own = owner[facei];
 
             // This gives you the patch ID for a face. If the face is internal, you get -1
@@ -1062,9 +1134,9 @@ void Foam::fvDVM::Update()
             h = 0.5 * dt * (H / tau + (Hold - h) / tauOld);
             b = 0.5 * dt * (B / tau + (Bold - b) / tauOld);
 
-            forAll(mycell, index)
+            forAll(myface, index)
             {
-                const label facei = mycell[index];
+                const label facei = myface[index];
                 const label own = owner[facei];
 
                 // This gives you the patch ID for a face. If the face is internal, you get -1
@@ -1118,7 +1190,18 @@ scalarField Foam::fvDVM::ConservedToPrim(scalar rhoC, vector rhoU, scalar rhoE)
     return VariablesToField(rho, U, lambda);
 }
 
-scalarField Foam::fvDVM::VariablesToField(scalar head, vector V, scalar tail)
+label Foam::fvDVM::ConservedToPrim(scalar rhoC, vector rhoU, scalar rhoE, scalarField &prim)
+{
+    scalar rho, lambda;
+    vector U;
+    ConservedToPrim(rhoC, rhoU, rhoE, rho, U, lambda);
+    prim = VariablesToField(rho, U, lambda);
+    if (prim[0] < SMALL || prim[4] < SMALL)
+        return 1;
+    return 2;
+}
+
+scalarField Foam::fvDVM::VariablesToField(const scalar &head, const vector &V, const scalar &tail)
 {
     scalarField s(5);
     s[0] = head;
@@ -1129,7 +1212,7 @@ scalarField Foam::fvDVM::VariablesToField(scalar head, vector V, scalar tail)
     return s;
 }
 
-void Foam::fvDVM::FieldToVariables(scalarField s, scalar &head, vector &V, scalar &tail)
+void Foam::fvDVM::FieldToVariables(const scalarField &s, scalar &head, vector &V, scalar &tail)
 {
     head = s[0];
     V.x() = s[1];
@@ -1138,7 +1221,7 @@ void Foam::fvDVM::FieldToVariables(scalarField s, scalar &head, vector &V, scala
     tail = s[4];
 }
 
-void Foam::fvDVM::MicroSlope(scalar &srho, vector &srhoU, scalar &srhoE, scalar &rho, vector &U, scalar &lambda, scalar &grho, vector &gU, scalar &glambda)
+void Foam::fvDVM::MicroSlope(const scalar &srho, const vector &srhoU, const scalar &srhoE, const scalar &rho, const vector &U, const scalar &lambda, scalar &grho, vector &gU, scalar &glambda)
 {
     const label &K = KInner_;
     const vector dU = (srhoU - U * srho) / rho;
@@ -1149,7 +1232,7 @@ void Foam::fvDVM::MicroSlope(scalar &srho, vector &srhoU, scalar &srhoE, scalar 
     grho = srho / rho - (U & gU) - 0.5 * (magSqr(U) + (K + 3) / (2.0 * lambda)) * glambda;
 }
 
-scalarField Foam::fvDVM::MicroSlope(scalarField &slope, scalarField &prim)
+scalarField Foam::fvDVM::MicroSlope(const scalarField &slope, const scalarField &prim)
 {
     scalar srho = slope[0];
     vector srhoU(slope[1], slope[2], slope[3]);
@@ -1204,7 +1287,7 @@ void Foam::fvDVM::CalcMoment(const scalarField &prim, scalarField &Mu, scalarFie
     Mxi[2] = innerK * (innerK + 2.0) / (4.0 * lambda * lambda); // <\xi^4>
 }
 
-scalarField Foam::fvDVM::Moment_uv1v2xi(scalarField &Mu, scalarField &Mv1, scalarField &Mv2, scalarField &Mxi,
+scalarField Foam::fvDVM::Moment_uv1v2xi(const scalarField &Mu, const scalarField &Mv1, const scalarField &Mv2, const scalarField &Mxi,
                                         label alpha, label beta, label gamma, label delta)
 {
     scalarField uv1v2xi(5);
@@ -1219,8 +1302,8 @@ scalarField Foam::fvDVM::Moment_uv1v2xi(scalarField &Mu, scalarField &Mv1, scala
     return uv1v2xi;
 }
 
-scalarField Foam::fvDVM::Moment_auv1v2xi(scalarField &s, scalarField &Mu, scalarField &Mv1, scalarField &Mv2, scalarField &Mxi,
-                                         label alpha, label beta, label gamma)
+scalarField Foam::fvDVM::Moment_auv1v2xi(const scalarField &s, const scalarField &Mu, const scalarField &Mv1, const scalarField &Mv2,
+                                         const scalarField &Mxi, label alpha, label beta, label gamma)
 {
     scalarField auv1v2xi(5);
     auv1v2xi = s[0] * Moment_uv1v2xi(Mu, Mv1, Mv2, Mxi, alpha + 0, beta + 0, gamma + 0, 0) +
@@ -1299,6 +1382,378 @@ void Foam::fvDVM::DiscreteMaxwell(
     bEq = (K + 3.0 - D) * hEq / (2.0 * lambda);
 }
 
+tmp<scalarField> Foam::fvDVM::getSoundSpeed()
+{
+    tmp<scalarField> tvf(sqrt(0.5 * Gamma() / lambdaVol()));
+    return tvf;
+}
+
+label Foam::fvDVM::CheckInterfacePrim(const scalar &rho, const vector &rhoU, const scalar &rhoE, const label &celli, const vector d,
+                                      scalar &rho_face, vector &U_face, scalar &lambda_face)
+{
+    scalar rho_temp = rho + (rhoGradVol_[celli] & d);
+    vector rhoU_temp = rhoU + (rhoUgradVol_[celli].T() & d);
+    scalar rhoE_temp = rhoE + (rhoEgradVol_[celli] & d);
+    ConservedToPrim(rho_temp, rhoU_temp, rhoE_temp, rho_face, U_face, lambda_face);
+    if (rho_face < SMALL || lambda_face < SMALL)
+        return 1;
+    return orderGlobal;
+}
+
+scalarField Foam::fvDVM::GetTimeIntegration(const scalarField &prim, const scalar dt, const scalarField &primL, const scalarField &primR)
+{
+    scalarField Mt(5);
+    scalar tau = GetTau(prim[0], prim[4]) + artificialViscosity(primL, primR) * dt; // Add additional dissipation in case of strong shock
+
+    scalar rt = tau / dt;
+    if (rt > 1.0e3)
+    {
+        scalar x[7];
+        x[0] = 1.0;
+        x[1] = dt / tau;
+        for (label xi = 2; xi <= 6; xi++)
+            x[xi] = x[xi - 1] * x[1];
+
+        Mt[0] = x[1] / 2.0 - x[2] / 6.0 + x[3] / 24.0 - x[4] / 120.0 + x[5] / 720.0 - x[6] / 5040.0;
+        Mt[1] = -x[1] / 6.0 + x[2] / 12.0 - x[3] / 40.0 + x[4] / 180.0 - x[5] / 1008.0 + x[6] / 6720.0;
+        Mt[2] = +x[1] / 6.0 - x[2] / 24.0 + x[3] / 120.0 - x[4] / 720.0 + x[5] / 5040.0 - x[6] / 40320.0;
+        Mt[3] = 1.0 - Mt[0];
+        Mt[4] = -0.5 + Mt[2] - Mt[1];
+
+        Mt[0] = Mt[0] * dt;
+        Mt[1] = Mt[1] * dt * dt;
+        Mt[2] = Mt[2] * dt * dt;
+        Mt[3] = Mt[3] * dt;
+        Mt[4] = Mt[4] * dt * dt;
+    }
+    else
+    {
+        scalar expp = exp(-dt / tau);
+        Mt[3] = tau * (1.0 - expp);
+        Mt[4] = -tau * dt * expp + tau * Mt[3];
+        Mt[0] = dt - Mt[3];
+        Mt[1] = -tau * Mt[0] + Mt[4];
+        Mt[2] = 0.5 * dt * dt - tau * Mt[0];
+    }
+    return Mt;
+}
+
+scalar Foam::fvDVM::artificialViscosity(const scalarField &primL, const scalarField &primR)
+{
+    return std::abs(primL[0] / primL[4] - primR[0] / primR[4]) / std::abs(primL[0] / primL[4] + primR[0] / primR[4]);
+}
+
+void Foam::fvDVM::moment_accumulator_first(scalar &rho, vector &rhoU, scalar &rhoE, scalar &h, scalar &b, vector &u,
+                                           const scalar &hl, const scalar &bl,
+                                           const tensor &frame, const vector &xi, const scalar &weight,
+                                           const scalar &hr, const scalar &br)
+{
+    u = frame & xi;      // Micro velocity in local frame
+    if (u.x() >= VSMALL) // Comming from own
+    {
+        h = hl;
+        b = bl;
+    }
+    else if (u.x() < -VSMALL) // Comming form nei
+    {
+        h = hr;
+        b = br;
+    }
+    else
+    {
+        h = 0.5 * (hl + hr);
+        b = 0.5 * (bl + br);
+    }
+
+    // Obtain the conserved variables in local frame by collision
+    moment_accumulator(rho, rhoU, rhoE, h, b, u, weight);
+}
+
+void Foam::fvDVM::moment_accumulator_second(scalar &rho, vector &rhoU, scalar &rhoE, scalar &h, vector &dh, scalar &b, vector &db, vector &u,
+                                            const scalar &hl, const vector &dhl, const scalar &bl, const vector &dbl, const vector &dl,
+                                            const tensor &frame, const vector &xi, const scalar &weight,
+                                            const scalar &hr, const vector &dhr, const scalar &br, const vector &dbr, const vector &dr)
+{
+    u = frame & xi; // Micro velocity in local frame
+
+    if (u.x() >= VSMALL) // Comming from own
+    {
+        h = hl + (dhl & dl);
+        b = bl + (dbl & dl);
+        dh = frame & dhl;
+        db = frame & dbl;
+    }
+    else if (u.x() < -VSMALL) // Comming form nei
+    {
+        h = hr + (dhr & dr);
+        b = br + (dbr & dr);
+        dh = frame & dhr;
+        db = frame & dbr;
+    }
+    else
+    {
+        h = 0.5 * (hl + (dhl & dl) + hr + (dhr & dr));
+        b = 0.5 * (bl + (dbl & dl) + br + (dbr & dr));
+        dh = 0.5 * frame & (dhl + dhr);
+        db = 0.5 * frame & (dbl + dbr);
+    }
+    // Obtain the conserved variables in local frame by collision
+    moment_accumulator(rho, rhoU, rhoE, h, b, u, weight);
+}
+
+void Foam::fvDVM::moment_accumulator_second(scalar &rho, vector &rhoU, scalar &rhoE, scalar &h, vector &dh, scalar &b, vector &db, vector &u,
+                                            const scalar &hl, const vector &dhl, const scalar &bl, const vector &dbl, const vector &dl,
+                                            const tensor &frame, const vector &xi, const scalar &weight,
+                                            const scalar &hr, const scalar &br)
+{
+    u = frame & xi; // Micro velocity in local frame
+
+    if (u.x() >= VSMALL) // Comming from own
+    {
+        h = hl + (dhl & dl);
+        b = bl + (dbl & dl);
+        dh = frame & dhl;
+        db = frame & dbl;
+    }
+    else if (u.x() < -VSMALL) // Comming form nei
+    {
+        h = hr;
+        b = br;
+        dh = Zero;
+        db = Zero;
+    }
+    else
+    {
+        h = 0.5 * (hl + (dhl & dl) + hr);
+        b = 0.5 * (bl + (dbl & dl) + br);
+        dh = 0.5 * frame & dhl;
+        db = 0.5 * frame & dbl;
+    }
+    // Obtain the conserved variables in local frame by collision
+    moment_accumulator(rho, rhoU, rhoE, h, b, u, weight);
+}
+
+void Foam::fvDVM::moment_accumulator_second(scalar &rho, vector &rhoU, scalar &rhoE, scalar &h, vector &dh, scalar &b, vector &db, vector &u,
+                                            const scalar &hl, const scalar &bl,
+                                            const tensor &frame, const vector &xi, const scalar &weight,
+                                            const scalar &hr, const vector &dhr, const scalar &br, const vector &dbr, const vector &dr)
+{
+    u = frame & xi; // Micro velocity in local frame
+
+    if (u.x() >= VSMALL) // Comming from own
+    {
+        h = hl;
+        b = bl;
+        dh = Zero;
+        db = Zero;
+    }
+    else if (u.x() < -VSMALL) // Comming form nei
+    {
+        h = hr + (dhr & dr);
+        b = br + (dbr & dr);
+        dh = frame & dhr;
+        db = frame & dbr;
+    }
+    else
+    {
+        h = 0.5 * (hl + hr + (dhr & dr));
+        b = 0.5 * (bl + br + (dbr & dr));
+        dh = 0.5 * frame & dhr;
+        db = 0.5 * frame & dbr;
+    }
+    // Obtain the conserved variables in local frame by collision
+    moment_accumulator(rho, rhoU, rhoE, h, b, u, weight);
+}
+
+void Foam::fvDVM::moment_accumulator(scalar &rho, vector &rhoU, scalar &rhoE, const scalar &h, const scalar &b, const vector &u, const scalar &weight)
+{
+    rho += weight * h;
+    rhoU += weight * u * h; // local frame
+    rhoE += 0.5 * weight * (magSqr(u) * h + b);
+}
+
+void Foam::fvDVM::calc_g0_slope(const scalarField &primL, const vector &rhoGrad_L, const tensor &rhoUgrad_L, const vector &rhoEgrad_L,
+                                const scalarField &prim, const tensor &frame, scalarField &aBar, scalarField &bBar, scalarField &cBar, scalarField &aT,
+                                const scalarField &primR, const vector &rhoGrad_R, const tensor &rhoUgrad_R, const vector &rhoEgrad_R)
+{
+    // Moment
+    scalarField Mu_L(7), MuL_L(7), MuR_L(7), Mv1_L(6), Mv2_L(6), Mxi_L(3);
+    scalarField Mu_R(7), MuL_R(7), MuR_R(7), Mv1_R(6), Mv2_R(6), Mxi_R(3);
+    CalcMoment(primL, Mu_L, Mv1_L, Mv2_L, Mxi_L, MuL_L, MuR_L);
+    CalcMoment(primR, Mu_R, Mv1_R, Mv2_R, Mxi_R, MuL_R, MuR_R);
+
+    // Obtain the normal and tangential gradient of conserved variables in local frame by collision
+    vector tempVector1 = frame & rhoGrad_L;
+    tensor tempTensor = frame & rhoUgrad_L & frame.T();
+    vector tempVector2 = frame & rhoEgrad_L;
+    scalarField N = VariablesToField(tempVector1.x(), tempTensor.x(), tempVector2.x());
+    scalarField T1 = VariablesToField(tempVector1.y(), tempTensor.y(), tempVector2.y());
+    scalarField T2 = VariablesToField(tempVector1.z(), tempTensor.z(), tempVector2.z());
+    scalarField aL = MicroSlope(N, primL);
+    scalarField bL = MicroSlope(T1, primL);
+    scalarField cL = MicroSlope(T2, primL);
+
+    tempVector1 = frame & rhoGrad_R;
+    tempTensor = frame & rhoUgrad_R & frame.T();
+    tempVector2 = frame & rhoEgrad_R;
+    N = VariablesToField(tempVector1.x(), tempTensor.x(), tempVector2.x());
+    T1 = VariablesToField(tempVector1.y(), tempTensor.y(), tempVector2.y());
+    T2 = VariablesToField(tempVector1.z(), tempTensor.z(), tempVector2.z());
+    scalarField aR = MicroSlope(N, primR);
+    scalarField bR = MicroSlope(T1, primR);
+    scalarField cR = MicroSlope(T2, primR);
+
+    N = primL[0] * Moment_auv1v2xi(aL, MuL_L, Mv1_L, Mv2_L, Mxi_L, 0, 0, 0) + primR[0] * Moment_auv1v2xi(aR, MuR_R, Mv1_R, Mv2_R, Mxi_R, 0, 0, 0);
+    T1 = primL[0] * Moment_auv1v2xi(bL, MuL_L, Mv1_L, Mv2_L, Mxi_L, 0, 0, 0) + primR[0] * Moment_auv1v2xi(bR, MuR_R, Mv1_R, Mv2_R, Mxi_R, 0, 0, 0);
+    T2 = primL[0] * Moment_auv1v2xi(cL, MuL_L, Mv1_L, Mv2_L, Mxi_L, 0, 0, 0) + primR[0] * Moment_auv1v2xi(cR, MuR_R, Mv1_R, Mv2_R, Mxi_R, 0, 0, 0);
+
+    get_abcT_slope(prim, aBar, bBar, cBar, aT, N, T1, T2);
+}
+
+void Foam::fvDVM::calc_g0_slope(const scalarField &primL, const vector &rhoGrad_L, const tensor &rhoUgrad_L, const vector &rhoEgrad_L,
+                                const scalarField &prim, const tensor &frame, scalarField &aBar, scalarField &bBar, scalarField &cBar, scalarField &aT)
+{
+    // Moment
+    scalarField Mu_L(7), MuL_L(7), MuR_L(7), Mv1_L(6), Mv2_L(6), Mxi_L(3);
+    CalcMoment(primL, Mu_L, Mv1_L, Mv2_L, Mxi_L, MuL_L, MuR_L);
+
+    // Obtain the normal and tangential gradient of conserved variables in local frame by collision
+    vector tempVector1 = frame & rhoGrad_L;
+    tensor tempTensor = frame & rhoUgrad_L & frame.T();
+    vector tempVector2 = frame & rhoEgrad_L;
+    scalarField N = VariablesToField(tempVector1.x(), tempTensor.x(), tempVector2.x());
+    scalarField T1 = VariablesToField(tempVector1.y(), tempTensor.y(), tempVector2.y());
+    scalarField T2 = VariablesToField(tempVector1.z(), tempTensor.z(), tempVector2.z());
+    scalarField aL = MicroSlope(N, primL);
+    scalarField bL = MicroSlope(T1, primL);
+    scalarField cL = MicroSlope(T2, primL);
+
+    N = primL[0] * Moment_auv1v2xi(aL, MuL_L, Mv1_L, Mv2_L, Mxi_L, 0, 0, 0);
+    T1 = primL[0] * Moment_auv1v2xi(bL, MuL_L, Mv1_L, Mv2_L, Mxi_L, 0, 0, 0);
+    T2 = primL[0] * Moment_auv1v2xi(cL, MuL_L, Mv1_L, Mv2_L, Mxi_L, 0, 0, 0);
+
+    get_abcT_slope(prim, aBar, bBar, cBar, aT, N, T1, T2);
+}
+
+void Foam::fvDVM::calc_g0_slope(const scalarField &prim, const tensor &frame, scalarField &aBar, scalarField &bBar, scalarField &cBar, scalarField &aT,
+                                const scalarField &primR, const vector &rhoGrad_R, const tensor &rhoUgrad_R, const vector &rhoEgrad_R)
+{
+    // Moment
+    scalarField Mu_R(7), MuL_R(7), MuR_R(7), Mv1_R(6), Mv2_R(6), Mxi_R(3);
+    CalcMoment(primR, Mu_R, Mv1_R, Mv2_R, Mxi_R, MuL_R, MuR_R);
+
+    // Obtain the normal and tangential gradient of conserved variables in local frame by collision
+    vector tempVector1 = frame & rhoGrad_R;
+    tensor tempTensor = frame & rhoUgrad_R & frame.T();
+    vector tempVector2 = frame & rhoEgrad_R;
+    scalarField N = VariablesToField(tempVector1.x(), tempTensor.x(), tempVector2.x());
+    scalarField T1 = VariablesToField(tempVector1.y(), tempTensor.y(), tempVector2.y());
+    scalarField T2 = VariablesToField(tempVector1.z(), tempTensor.z(), tempVector2.z());
+    scalarField aR = MicroSlope(N, primR);
+    scalarField bR = MicroSlope(T1, primR);
+    scalarField cR = MicroSlope(T2, primR);
+
+    N = primR[0] * Moment_auv1v2xi(aR, MuR_R, Mv1_R, Mv2_R, Mxi_R, 0, 0, 0);
+    T1 = primR[0] * Moment_auv1v2xi(bR, MuR_R, Mv1_R, Mv2_R, Mxi_R, 0, 0, 0);
+    T2 = primR[0] * Moment_auv1v2xi(cR, MuR_R, Mv1_R, Mv2_R, Mxi_R, 0, 0, 0);
+
+    get_abcT_slope(prim, aBar, bBar, cBar, aT, N, T1, T2);
+}
+
+void Foam::fvDVM::get_abcT_slope(const scalarField &prim, scalarField &aBar, scalarField &bBar, scalarField &cBar, scalarField &aT,
+                                 const scalarField &N, const scalarField &T1, const scalarField &T2)
+{
+    // Moment
+    scalarField Mu(7), MuL(7), MuR(7), Mv1(6), Mv2(6), Mxi(3);
+    CalcMoment(prim, Mu, Mv1, Mv2, Mxi, MuL, MuR);
+
+    // Calculate aBar, bBar, cBar
+    aBar = MicroSlope(N, prim);
+    bBar = MicroSlope(T1, prim);
+    cBar = MicroSlope(T2, prim);
+
+    // Calculate aT
+    scalarField Mau = Moment_auv1v2xi(aBar, Mu, Mv1, Mv2, Mxi, 1, 0, 0);
+    scalarField Mbv1 = Moment_auv1v2xi(bBar, Mu, Mv1, Mv2, Mxi, 0, 1, 0);
+    scalarField Mcv2 = Moment_auv1v2xi(cBar, Mu, Mv1, Mv2, Mxi, 0, 0, 1);
+    scalarField sw(-prim[0] * (Mau + Mbv1 + Mcv2));
+    aT = MicroSlope(sw, prim);
+}
+
+vector Foam::fvDVM::GetHeatFlux(const vector &U, const PtrList<DiscreteVelocityPoint> &DV_, const scalarField &h, const scalarField &b, const vectorField &u)
+{
+    vector qf = vector(0, 0, 0);
+    forAll(DV_, dvi)
+    {
+        vector c = u[dvi] - U;
+        qf += 0.5 * DV_[dvi].weight() * c * (magSqr(c) * h[dvi] + b[dvi]);
+    }
+    return qf;
+}
+
+void Foam::fvDVM::flux_calculator_second(const scalar &hi, const vector &dhi, const scalar &bi, const vector &dbi, const vector &xii,
+                                         const vector &qf, const scalar &weight, const scalar &magSf, const scalarField &Mt,
+                                         const scalarField &prim, const scalarField &aBar, const scalarField &bBar, const scalarField &cBar, const scalarField &aT,
+                                         scalar &hFlux, scalar &bFlux, scalar &rhoFlux, vector &rhoUflux, scalar &rhoEflux)
+{
+    // Auxiliary variables of slope
+    scalar rho, aRho, bRho, cRho, aTrho;
+    vector U, aU, bU, cU, aTU;
+    scalar lambda, aLambda, bLambda, cLambda, aTlambda;
+    FieldToVariables(prim, rho, U, lambda);
+    FieldToVariables(aBar, aRho, aU, aLambda);
+    FieldToVariables(bBar, bRho, bU, bLambda);
+    FieldToVariables(cBar, cRho, cU, cLambda);
+    FieldToVariables(aT, aTrho, aTU, aTlambda);
+
+    // <\xi^4>
+    label innerK = KInner_ + 3 - mesh_.nSolutionD();
+    scalar E4 = innerK * (innerK + 2.0) / (4.0 * lambda * lambda);
+
+    const scalar &vn = xii.x();
+    scalar H0, B0, Hplus, Bplus;
+    DiscreteMaxwell(H0, B0, rho, U, lambda, xii);
+    ShakhovPart(H0, B0, rho, U, lambda, qf, xii, Hplus, Bplus);
+
+    scalar huuvvwwxixi = 0.5 * (magSqr(xii) * H0 + B0);
+    hFlux = vn * (Mt[0] * (H0 + Hplus) + Mt[1] * (xii.x() * (aRho * H0 + (aU & xii) * H0 + aLambda * huuvvwwxixi) + xii.y() * (bRho * H0 + (bU & xii) * H0 + bLambda * huuvvwwxixi) + xii.z() * (cRho * H0 + (cU & xii) * H0 + cLambda * huuvvwwxixi)) + Mt[2] * (aTrho * H0 + (aTU & xii) * H0 + aTlambda * huuvvwwxixi) + Mt[3] * hi - Mt[4] * (xii & dhi)) * magSf;
+
+    scalar buuvvwwxixi = 0.5 * (magSqr(xii) * B0 + E4 * H0);
+    bFlux = vn * (Mt[0] * (B0 + Bplus) + Mt[1] * (xii.x() * (aRho * B0 + (aU & xii) * B0 + aLambda * buuvvwwxixi) + xii.y() * (bRho * B0 + (bU & xii) * B0 + bLambda * buuvvwwxixi) + xii.z() * (cRho * B0 + (cU & xii) * B0 + cLambda * buuvvwwxixi)) + Mt[2] * (aTrho * B0 + (aTU & xii) * B0 + aTlambda * buuvvwwxixi) + Mt[3] * bi - Mt[4] * (xii & dbi)) * magSf;
+
+    scalar tmpwh = weight * hFlux;
+    scalar tmpwb = weight * bFlux;
+
+    rhoFlux += tmpwh;
+    rhoUflux += tmpwh * xii;
+    rhoEflux += (magSqr(xii) * tmpwh + tmpwb); // lack of 0.5, will locate after the function call
+}
+
+void Foam::fvDVM::flux_calculator_first(const scalar &hi, const scalar &bi, const vector &xii,
+                                        const vector &qf, const scalar &weight, const scalar &magSf, const scalarField &Mt, const scalarField &prim,
+                                        scalar &hFlux, scalar &bFlux, scalar &rhoFlux, vector &rhoUflux, scalar &rhoEflux)
+{
+    // Auxiliary variables of slope
+    scalar rho, lambda;
+    vector U;
+    FieldToVariables(prim, rho, U, lambda);
+
+    const scalar &vn = xii.x();
+    scalar H0, B0, Hplus, Bplus;
+    DiscreteMaxwell(H0, B0, rho, U, lambda, xii);
+    ShakhovPart(H0, B0, rho, U, lambda, qf, xii, Hplus, Bplus);
+
+    hFlux = vn * (Mt[0] * (H0 + Hplus) + Mt[3] * hi) * magSf;
+    bFlux = vn * (Mt[0] * (B0 + Bplus) + Mt[3] * bi) * magSf;
+
+    scalar tmpwh = weight * hFlux;
+    scalar tmpwb = weight * bFlux;
+
+    rhoFlux += tmpwh;
+    rhoUflux += tmpwh * xii;
+    rhoEflux += (magSqr(xii) * tmpwh + tmpwb); // lack of 0.5, will locate after the function call
+}
+
 // * * * * * * * * * * * * * * * * Constructors  * * * * * * * * * * * * * * //
 
 Foam::fvDVM::fvDVM(
@@ -1320,6 +1775,7 @@ Foam::fvDVM::fvDVM(
       Pr_(readScalar(DVMProperties.subDict("gasProperties").lookup("Pr"))),
       KInner_(DVMProperties.subDict("gasProperties").lookupOrDefault<label>("KInner", 0)),
       Gamma_(scalar(KInner_ + 5) / scalar(KInner_ + 3)),
+      orderGlobal(DVMProperties.lookupOrDefault<label>("orderGlobal", 2)),
       DV_(0),
       rhoFluxSurf_(
           IOobject(
@@ -1413,7 +1869,70 @@ Foam::fvDVM::fvDVM(
               IOobject::NO_READ,
               IOobject::NO_WRITE),
           mesh_,
-          dimensionedTensor("0", dimless, I))
+          dimensionedTensor("0", dimless, I)),
+      L_rhoSurf_(
+          IOobject(
+              "L_rhoSurf",
+              mesh_.time().timeName(),
+              mesh_,
+              IOobject::NO_READ,
+              IOobject::NO_WRITE),
+          mesh_,
+          dimensionedScalar("0", dimless, 1.0)),
+      R_rhoSurf_(
+          IOobject(
+              "R_rhoSurf",
+              mesh_.time().timeName(),
+              mesh_,
+              IOobject::NO_READ,
+              IOobject::NO_WRITE),
+          mesh_,
+          dimensionedScalar("0", dimless, 1.0)),
+      L_Usurf_(
+          IOobject(
+              "L_Usurf",
+              mesh_.time().timeName(),
+              mesh_,
+              IOobject::NO_READ,
+              IOobject::NO_WRITE),
+          mesh_,
+          dimensionedVector("0", dimless, vector(0, 0, 0))),
+      R_Usurf_(
+          IOobject(
+              "R_Usurf",
+              mesh_.time().timeName(),
+              mesh_,
+              IOobject::NO_READ,
+              IOobject::NO_WRITE),
+          mesh_,
+          dimensionedVector("0", dimless, vector(0, 0, 0))),
+      L_lambdaSurf_(
+          IOobject(
+              "L_lambdaSurf",
+              mesh_.time().timeName(),
+              mesh_,
+              IOobject::NO_READ,
+              IOobject::NO_WRITE),
+          mesh_,
+          dimensionedScalar("0", dimless, 1.0)),
+      R_lambdaSurf_(
+          IOobject(
+              "R_lambdaSurf",
+              mesh_.time().timeName(),
+              mesh_,
+              IOobject::NO_READ,
+              IOobject::NO_WRITE),
+          mesh_,
+          dimensionedScalar("0", dimless, 1.0)),
+      cellOrderVol_(
+          IOobject(
+              "cellOrderVol",
+              mesh_.time().timeName(),
+              mesh_,
+              IOobject::NO_READ,
+              IOobject::NO_WRITE),
+          mesh_,
+          dimensionedScalar("0", dimless, 2.0))
 {
     scalarList weights = DVMProperties.lookup("weights");
     scalarList Xis = DVMProperties.lookup("Xis");
@@ -1445,15 +1964,11 @@ void Foam::fvDVM::getCoNum(scalar &maxCoNum, scalar &meanCoNum)
     maxCoNum = max(gMax(UbyDxMacro), gMax(UbyDxMicro)) * dt;
 }
 
-tmp<scalarField> Foam::fvDVM::getSoundSpeed()
-{
-    tmp<scalarField> tvf(sqrt(0.5 * Gamma() / lambdaVol()));
-    return tvf;
-}
-
 void Foam::fvDVM::evolution()
 {
-    Reconstruction();
+    if (orderGlobal == 2)
+        Reconstruction();
+    CheckReconstruction();
     CalcFluxSurf();
     Update();
 }
