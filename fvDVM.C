@@ -741,156 +741,97 @@ void Foam::fvDVM::CalcFluxSurf()
                 // Local geometric information
                 const label own = pOwner[pFacei];
                 tensor frame = FramePatch[pFacei];
+                label faceOrder = round(cellOrderVol_[own]);
 
                 // Face variable
                 scalarField h(nXi()), b(nXi());
                 vectorField dh(nXi()), db(nXi()), ui(nXi()); // Micro gradient and velocity in local frame
-                scalar lambda, rho, rhoL, rhoR, rhoE, rhoEL, rhoER;
-                vector U, rhoU, rhoUL, rhoUR;
+                scalar lambda, rho, rhoE;
+                vector U, rhoU;
 
-                // Gradient and micro slope
-                scalar aRho, bRho, cRho, aTrho;
-                vector aU, bU, cU, aTU;
-                scalar aLambda, bLambda, cLambda, aTlambda;
+                // Macro slope of g in local frame and time coefficients
+                scalarField aBar(5), bBar(5), cBar(5), aT(5), Mt(5);
 
-                // Moment
-                scalarField Mu(7), MuL(7), MuR(7), Mv1(6), Mv2(6), Mxi(3);
-                scalarField Mu_L(7), MuL_L(7), MuR_L(7), Mv1_L(6), Mv2_L(6), Mxi_L(3);
-                scalarField Mu_R(7), MuL_R(7), MuR_R(7), Mv1_R(6), Mv2_R(6), Mxi_R(3);
-                scalarField M0u(5), Mau(5), Mbv1(5), Mcv2(5), MaTu(5), Mt(5);
-
-                PrimToConserved(rhoVol_[own], Uvol_[own], lambdaVol_[own], rhoL, rhoUL, rhoEL); // Left cell-centered conservered value
-                rho = rhoPatch[pFacei];
-                rhoU = Upatch[pFacei];
-                rhoE = lambdaPatch[pFacei];
-                PrimToConserved(rho, rhoU, rhoE, rhoR, rhoUR, rhoER); // Right cell-centered conservered value
-
-                // W^L in local frame at cell interface
-                rhoL = rhoL + (rhoGradVol_[own] & (CfPatch[pFacei] - C[own]));
-                rhoUL = frame & (rhoUL + (rhoUgradVol_[own].T() & (CfPatch[pFacei] - C[own])));
-                rhoEL = rhoEL + (rhoEgradVol_[own] & (CfPatch[pFacei] - C[own]));
-                scalarField primL = ConservedToPrim(rhoL, rhoUL, rhoEL);
-                CalcMoment(primL, Mu_L, Mv1_L, Mv2_L, Mxi_L, MuL_L, MuR_L);
-
-                // W^R in local frame at cell interface
-                rhoUR = frame & rhoUR;
-                scalarField primR = ConservedToPrim(rhoR, rhoUR, rhoER);
-                CalcMoment(primR, Mu_R, Mv1_R, Mv2_R, Mxi_R, MuL_R, MuR_R);
+                // Prim^L and Prim^R in local frame at cell interface
+                scalarField primL = VariablesToField(L_rhoPatch[pFacei], frame & L_Upatch[pFacei], L_lambdaPatch[pFacei]);
+                scalarField primR = VariablesToField(rhoPatch[pFacei], frame & Upatch[pFacei], lambdaPatch[pFacei]);
 
                 // Obtain the conserved variables in local frame at cell interface by collision
-                scalarField conVars(primL[0] * Moment_uv1v2xi(MuL_L, Mv1_L, Mv2_L, Mxi_L, 0, 0, 0, 0) +
-                                    primR[0] * Moment_uv1v2xi(MuR_R, Mv1_R, Mv2_R, Mxi_R, 0, 0, 0, 0));
-                FieldToVariables(conVars, rho, rhoU, rhoE);
+                scalarField prim(5);
+                if (faceOrder == 2)
+                {
+                    rho = 0.0;
+                    rhoU = vector(0, 0, 0);
+                    rhoE = 0.0;
 
-                // Obtain both normal and tangential gradient of conserved variables in local frame by collision
-                vector tempVector1 = frame & rhoGradVol_[own];
-                tensor tempTensor = frame & rhoUgradVol_[own] & frame.T();
-                vector tempVector2 = frame & rhoEgradVol_[own];
-                scalarField N = VariablesToField(tempVector1.x(), tempTensor.x(), tempVector2.x());
-                scalarField T1 = VariablesToField(tempVector1.y(), tempTensor.y(), tempVector2.y());
-                scalarField T2 = VariablesToField(tempVector1.z(), tempTensor.z(), tempVector2.z());
-                scalarField aL = MicroSlope(N, primL);
-                scalarField bL = MicroSlope(T1, primL);
-                scalarField cL = MicroSlope(T2, primL);
+                    vector dl = CfPatch[pFacei] - C[own];
+                    forAll(DV_, dvi)
+                    {
+                        DiscreteVelocityPoint &dv = DV_[dvi];
+                        moment_accumulator_second(rho, rhoU, rhoE, h[dvi], dh[dvi], b[dvi], db[dvi], ui[dvi],
+                                                  dv.hVol()[own], dv.hGradVol()[own], dv.bVol()[own], dv.bGradVol()[own], dl,
+                                                  frame, dv.xi(), dv.weight(),
+                                                  dv.hVol().boundaryField()[patchi][pFacei], dv.bVol().boundaryField()[patchi][pFacei]);
+                    }
+                    faceOrder = ConservedToPrim(rho, rhoU, rhoE, prim);
+                    if (faceOrder == 2)
+                    {
+                        calc_g0_slope(primL, rhoGradVol_[own], rhoUgradVol_[own], rhoEgradVol_[own],
+                                      prim, frame, aBar, bBar, cBar, aT);
+                    }
+                }
+                if (faceOrder != 2)
+                {
+                    rho = 0.0;
+                    rhoU = vector(0, 0, 0);
+                    rhoE = 0.0;
 
-                N = primL[0] * Moment_auv1v2xi(aL, MuL_L, Mv1_L, Mv2_L, Mxi_L, 0, 0, 0);
-                T1 = primL[0] * Moment_auv1v2xi(bL, MuL_L, Mv1_L, Mv2_L, Mxi_L, 0, 0, 0);
-                T2 = primL[0] * Moment_auv1v2xi(cL, MuL_L, Mv1_L, Mv2_L, Mxi_L, 0, 0, 0);
-
-                // Calculate aBar, bBar, cBar and related moment
-                scalarField prim = ConservedToPrim(rho, rhoU, rhoE);
-                scalarField aBar = MicroSlope(N, prim);
-                scalarField bBar = MicroSlope(T1, prim);
-                scalarField cBar = MicroSlope(T2, prim);
-                FieldToVariables(aBar, aRho, aU, aLambda);
-                FieldToVariables(bBar, bRho, bU, bLambda);
-                FieldToVariables(cBar, cRho, cU, cLambda);
-
-                CalcMoment(prim, Mu, Mv1, Mv2, Mxi, MuL, MuR);
-                Mau = Moment_auv1v2xi(aBar, Mu, Mv1, Mv2, Mxi, 1, 0, 0);
-                Mbv1 = Moment_auv1v2xi(bBar, Mu, Mv1, Mv2, Mxi, 0, 1, 0);
-                Mcv2 = Moment_auv1v2xi(cBar, Mu, Mv1, Mv2, Mxi, 0, 0, 1);
-                scalarField sw(-rho * (Mau + Mbv1 + Mcv2));
-                scalarField aT = MicroSlope(sw, prim);
-                FieldToVariables(aT, aTrho, aTU, aTlambda);
+                    forAll(DV_, dvi)
+                    {
+                        DiscreteVelocityPoint &dv = DV_[dvi];
+                        moment_accumulator_first(rho, rhoU, rhoE, h[dvi], b[dvi], ui[dvi],
+                                                 dv.hVol()[own], dv.bVol()[own],
+                                                 frame, dv.xi(), dv.weight(),
+                                                 dv.hVol().boundaryField()[patchi][pFacei], dv.bVol().boundaryField()[patchi][pFacei]);
+                    }
+                    prim = ConservedToPrim(rho, rhoU, rhoE);
+                    if (prim[0] < SMALL || prim[4] < SMALL)
+                        Info << "Error: moment_accumulator_first failed at fixedValue patch face!" << tab
+                             << prim[0] << tab << prim[4] << tab << CfPatch[pFacei] << nl;
+                }
 
                 // Calculate collision time and some time integration terms
+                Mt = GetTimeIntegration(prim, dt, primL, primR);
                 FieldToVariables(prim, rho, U, lambda);
-                scalar tau = GetTau(rho, lambda) + std::abs(primL[0] / primL[4] - primR[0] / primR[4]) / std::abs(primL[0] / primL[4] + primR[0] / primR[4]) * dt; // Add additional dissipation in case of strong shock
 
-                Mt[3] = tau * (1.0 - exp(-dt / tau));
-                Mt[4] = -tau * dt * exp(-dt / tau) + tau * Mt[3];
-                Mt[0] = dt - Mt[3];
-                Mt[1] = -tau * Mt[0] + Mt[4];
-                Mt[2] = 0.5 * dt * dt - tau * Mt[0];
+                // Get heatflux at interface
+                vector qf = GetHeatFlux(U, DV_, h, b, ui);
 
-                M0u = Moment_uv1v2xi(Mu, Mv1, Mv2, Mxi, 1, 0, 0, 0);
-                Mau = Moment_auv1v2xi(aBar, Mu, Mv1, Mv2, Mxi, 2, 0, 0);
-                Mbv1 = Moment_auv1v2xi(bBar, Mu, Mv1, Mv2, Mxi, 1, 1, 0);
-                Mcv2 = Moment_auv1v2xi(cBar, Mu, Mv1, Mv2, Mxi, 1, 0, 1);
-                MaTu = Moment_auv1v2xi(aT, Mu, Mv1, Mv2, Mxi, 1, 0, 0);
-
-                scalarField flux(rho * (Mt[0] * M0u + Mt[1] * (Mau + Mbv1 + Mcv2) + Mt[2] * MaTu));
-                FieldToVariables(flux, rhoFluxPatch[pFacei], rhoUfluxPatch[pFacei], rhoEfluxPatch[pFacei]);
-
-                vector qf = vector(0, 0, 0);
-                forAll(DV_, dvi)
+                if (faceOrder == 2)
                 {
-                    DiscreteVelocityPoint &dv = DV_[dvi];
-                    const vector xii = frame & dv.xi(); // Micro velocity in local frame
-                    ui[dvi] = xii;
-
-                    if (xii.x() >= VSMALL) // Comming from own
+                    forAll(DV_, dvi)
                     {
-                        h[dvi] = dv.hVol()[own] + (dv.hGradVol()[own] & (CfPatch[pFacei] - C[own]));
-                        b[dvi] = dv.bVol()[own] + (dv.bGradVol()[own] & (CfPatch[pFacei] - C[own]));
-                        dh[dvi] = frame & dv.hGradVol()[own];
-                        db[dvi] = frame & dv.bGradVol()[own];
+                        DiscreteVelocityPoint &dv = DV_[dvi];
+                        flux_calculator_second(h[dvi], dh[dvi], b[dvi], db[dvi], ui[dvi],
+                                               qf, DV_[dvi].weight(), magSfPatch[pFacei], Mt,
+                                               prim, aBar, bBar, cBar, aT,
+                                               dv.UpdatehFlux().boundaryFieldRef()[patchi][pFacei], dv.UpdatebFlux().boundaryFieldRef()[patchi][pFacei],
+                                               rhoFluxPatch[pFacei], rhoUfluxPatch[pFacei], rhoEfluxPatch[pFacei]);
                     }
-                    else if (xii.x() < -VSMALL) // Comming form nei
-                    {
-                        h[dvi] = dv.hVol().boundaryField()[patchi][pFacei];
-                        b[dvi] = dv.bVol().boundaryField()[patchi][pFacei];
-                        dh[dvi] = vector(0.0, 0.0, 0.0);
-                        db[dvi] = vector(0.0, 0.0, 0.0);
-                    }
-                    else
-                    {
-                        h[dvi] = 0.5 * (dv.hVol()[own] + (dv.hGradVol()[own] & (CfPatch[pFacei] - C[own])) + dv.hVol().boundaryField()[patchi][pFacei]);
-                        b[dvi] = 0.5 * (dv.bVol()[own] + (dv.bGradVol()[own] & (CfPatch[pFacei] - C[own])) + dv.bVol().boundaryField()[patchi][pFacei]);
-                        dh[dvi] = 0.5 * frame & dv.hGradVol()[own];
-                        db[dvi] = 0.5 * frame & dv.bGradVol()[own];
-                    }
-                    vector c = ui[dvi] - U;
-                    qf += 0.5 * dv.weight() * c * (magSqr(c) * h[dvi] + b[dvi]);
                 }
-
-                forAll(DV_, dvi)
+                else
                 {
-                    DiscreteVelocityPoint &dv = DV_[dvi];
-                    const vector &xii = ui[dvi];
-                    const scalar &vn = xii.x();
-                    const scalar &weight = dv.weight();
-                    const scalar &hi = h[dvi];
-                    const scalar &bi = b[dvi];
-                    const vector &dhi = dh[dvi];
-                    const vector &dbi = db[dvi];
-
-                    scalar H0, B0, Hplus, Bplus;
-                    DiscreteMaxwell(H0, B0, rho, U, lambda, xii);
-                    ShakhovPart(H0, B0, rho, U, lambda, qf, xii, Hplus, Bplus);
-
-                    rhoFluxPatch[pFacei] += weight * vn * (Mt[0] * Hplus + Mt[3] * hi - Mt[4] * (xii & dhi));
-                    rhoUfluxPatch[pFacei] += weight * vn * xii * (Mt[0] * Hplus + Mt[3] * hi - Mt[4] * (xii & dhi));
-                    rhoEfluxPatch[pFacei] += 0.5 * weight * vn * (Mt[0] * (magSqr(xii) * Hplus + Bplus) + Mt[3] * (magSqr(xii) * hi + bi) - Mt[4] * (magSqr(xii) * (xii & dhi) + (xii & dbi)));
-
-                    dv.UpdatehFlux().boundaryFieldRef()[patchi][pFacei] = vn * (Mt[0] * (H0 + Hplus) + Mt[1] * (xii.x() * (aRho * H0 + (aU & xii) * H0 + 0.5 * aLambda * (magSqr(xii) * H0 + B0)) + xii.y() * (bRho * H0 + (bU & xii) * H0 + 0.5 * bLambda * (magSqr(xii) * H0 + B0)) + xii.z() * (cRho * H0 + (cU & xii) * H0 + 0.5 * cLambda * (magSqr(xii) * H0 + B0))) + Mt[2] * (aTrho * H0 + (aTU & xii) * H0 + 0.5 * aTlambda * (magSqr(xii) * H0 + B0)) + Mt[3] * hi - Mt[4] * (xii & dhi)) * magSfPatch[pFacei];
-
-                    dv.UpdatebFlux().boundaryFieldRef()[patchi][pFacei] = vn * (Mt[0] * (B0 + Bplus) + Mt[1] * (xii.x() * (aRho * B0 + (aU & xii) * B0 + 0.5 * aLambda * (magSqr(xii) * B0 + Mxi[2] * H0)) + xii.y() * (bRho * B0 + (bU & xii) * B0 + 0.5 * bLambda * (magSqr(xii) * B0 + Mxi[2] * H0)) + xii.z() * (cRho * B0 + (cU & xii) * B0 + 0.5 * cLambda * (magSqr(xii) * B0 + Mxi[2] * H0))) + Mt[2] * (aTrho * B0 + (aTU & xii) * B0 + 0.5 * aTlambda * (magSqr(xii) * B0 + Mxi[2] * H0)) + Mt[3] * bi - Mt[4] * (xii & dbi)) * magSfPatch[pFacei];
+                    forAll(DV_, dvi)
+                    {
+                        DiscreteVelocityPoint &dv = DV_[dvi];
+                        flux_calculator_first(h[dvi], b[dvi], ui[dvi],
+                                              qf, DV_[dvi].weight(), magSfPatch[pFacei], Mt, prim,
+                                              dv.UpdatehFlux().boundaryFieldRef()[patchi][pFacei], dv.UpdatebFlux().boundaryFieldRef()[patchi][pFacei],
+                                              rhoFluxPatch[pFacei], rhoUfluxPatch[pFacei], rhoEfluxPatch[pFacei]);
+                    }
                 }
-                rhoFluxPatch[pFacei] = rhoFluxPatch[pFacei] * magSfPatch[pFacei];
-                rhoUfluxPatch[pFacei] = (frame.T() & rhoUfluxPatch[pFacei]) * magSfPatch[pFacei];
-                rhoEfluxPatch[pFacei] = rhoEfluxPatch[pFacei] * magSfPatch[pFacei];
+                rhoUfluxPatch[pFacei] = frame.T() & rhoUfluxPatch[pFacei]; // Momentum flux in global frame
+                rhoEfluxPatch[pFacei] = 0.5 * rhoEfluxPatch[pFacei];       // Add the 0.5 back in energy flux
             }
         }
         else if (type == "zeroGradient")
