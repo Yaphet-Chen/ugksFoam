@@ -837,6 +837,107 @@ void Foam::fvDVM::CalcFluxSurf()
         }
         else if (type == "zeroGradient")
         {
+            rhoFluxPatch = 0.0;
+            rhoUfluxPatch = vector(0, 0, 0);
+            rhoEfluxPatch = 0.0;
+
+            forAll(pOwner, pFacei)
+            {
+                // Local geometric information
+                const label own = pOwner[pFacei];
+                const tensor frame = FramePatch[pFacei];
+                label faceOrder = round(cellOrderVol_[own]);
+
+                // Face variable
+                scalarField h(nXi()), b(nXi());
+                vectorField dh(nXi()), db(nXi()), ui(nXi()); // Micro gradient and velocity in local frame
+                scalar lambda, rho, rhoE;
+                vector U, rhoU;
+
+                // Macro slope of g in local frame and time coefficients
+                scalarField aBar(5), bBar(5), cBar(5), aT(5), Mt(5);
+
+                // Prim^L and Prim^R in local frame at cell interface
+                scalarField primL = VariablesToField(L_rhoPatch[pFacei], frame & L_Upatch[pFacei], L_lambdaPatch[pFacei]);
+                scalarField primR = VariablesToField(rhoVol()[own], frame & Uvol()[own], lambdaVol()[own]);
+
+                // Obtain the conserved variables in local frame at cell interface by collision
+                scalarField prim(5);
+                if (faceOrder == 2)
+                {
+                    rho = 0.0;
+                    rhoU = vector(0, 0, 0);
+                    rhoE = 0.0;
+
+                    vector dl = CfPatch[pFacei] - C[own];
+                    forAll(DV_, dvi)
+                    {
+                        DiscreteVelocityPoint &dv = DV_[dvi];
+                        moment_accumulator_second(rho, rhoU, rhoE, h[dvi], dh[dvi], b[dvi], db[dvi], ui[dvi],
+                                                  dv.hVol()[own], dv.hGradVol()[own], dv.bVol()[own], dv.bGradVol()[own], dl,
+                                                  frame, dv.xi(), dv.weight(),
+                                                  dv.hVol()[own], dv.bVol()[own]);
+                    }
+                    faceOrder = ConservedToPrim(rho, rhoU, rhoE, prim);
+                    if (faceOrder == 2)
+                    {
+                        calc_g0_slope(primL, rhoGradVol_[own], rhoUgradVol_[own], rhoEgradVol_[own],
+                                      prim, frame, aBar, bBar, cBar, aT);
+                    }
+                }
+                if (faceOrder != 2)
+                {
+                    rho = 0.0;
+                    rhoU = vector(0, 0, 0);
+                    rhoE = 0.0;
+
+                    forAll(DV_, dvi)
+                    {
+                        DiscreteVelocityPoint &dv = DV_[dvi];
+                        moment_accumulator_first(rho, rhoU, rhoE, h[dvi], b[dvi], ui[dvi],
+                                                 dv.hVol()[own], dv.bVol()[own],
+                                                 frame, dv.xi(), dv.weight(),
+                                                 dv.hVol()[own], dv.bVol()[own]);
+                    }
+                    prim = ConservedToPrim(rho, rhoU, rhoE);
+                    if (prim[0] < SMALL || prim[4] < SMALL)
+                        Info << "Error: moment_accumulator_first failed at zeroGradient patch face!" << tab
+                             << prim[0] << tab << prim[4] << tab << CfPatch[pFacei] << nl;
+                }
+
+                // Calculate collision time and some time integration terms
+                Mt = GetTimeIntegration(prim, dt, primL, primR);
+                FieldToVariables(prim, rho, U, lambda);
+
+                // Get heatflux at interface
+                vector qf = GetHeatFlux(U, DV_, h, b, ui);
+
+                if (faceOrder == 2)
+                {
+                    forAll(DV_, dvi)
+                    {
+                        DiscreteVelocityPoint &dv = DV_[dvi];
+                        flux_calculator_second(h[dvi], dh[dvi], b[dvi], db[dvi], ui[dvi],
+                                               qf, DV_[dvi].weight(), magSfPatch[pFacei], Mt,
+                                               prim, aBar, bBar, cBar, aT,
+                                               dv.UpdatehFlux().boundaryFieldRef()[patchi][pFacei], dv.UpdatebFlux().boundaryFieldRef()[patchi][pFacei],
+                                               rhoFluxPatch[pFacei], rhoUfluxPatch[pFacei], rhoEfluxPatch[pFacei]);
+                    }
+                }
+                else
+                {
+                    forAll(DV_, dvi)
+                    {
+                        DiscreteVelocityPoint &dv = DV_[dvi];
+                        flux_calculator_first(h[dvi], b[dvi], ui[dvi],
+                                              qf, DV_[dvi].weight(), magSfPatch[pFacei], Mt, prim,
+                                              dv.UpdatehFlux().boundaryFieldRef()[patchi][pFacei], dv.UpdatebFlux().boundaryFieldRef()[patchi][pFacei],
+                                              rhoFluxPatch[pFacei], rhoUfluxPatch[pFacei], rhoEfluxPatch[pFacei]);
+                    }
+                }
+                rhoUfluxPatch[pFacei] = frame.T() & rhoUfluxPatch[pFacei]; // Momentum flux in global frame
+                rhoEfluxPatch[pFacei] = 0.5 * rhoEfluxPatch[pFacei];       // Add the 0.5 back in energy flux
+            }
         }
         else if (rhoVol_.boundaryField()[patchi].coupled())
         {
