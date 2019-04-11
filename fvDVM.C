@@ -503,7 +503,7 @@ void Foam::fvDVM::CalcFluxSurf()
             }
             prim = ConservedToPrim(rho, rhoU, rhoE);
             if (prim[0] < SMALL || prim[4] < SMALL)
-                Info << "Error: moment_accumulator_first failed at internal face!" << tab
+                Pout << "Error: moment_accumulator_first failed at internal face!" << tab
                      << prim[0] << tab << prim[4] << tab << Cf[facei] << nl;
         }
 
@@ -676,7 +676,7 @@ void Foam::fvDVM::CalcFluxSurf()
                 }
                 rho_w = -incidence / reflection;
                 if (rho_w < 0.0)
-                    Info << "Error: negative wall density!" << tab << rho_w << tab << CfPatch[pFacei] << nl;
+                    Pout << "Error: negative wall density!" << tab << rho_w << tab << CfPatch[pFacei] << nl;
 
                 // Update the micro and macro flux, combined first and second order flux
                 scalar my_magSf = magSfPatch[pFacei];
@@ -797,7 +797,7 @@ void Foam::fvDVM::CalcFluxSurf()
                     }
                     prim = ConservedToPrim(rho, rhoU, rhoE);
                     if (prim[0] < SMALL || prim[4] < SMALL)
-                        Info << "Error: moment_accumulator_first failed at fixedValue patch face!" << tab
+                        Pout << "Error: moment_accumulator_first failed at fixedValue patch face!" << tab
                              << prim[0] << tab << prim[4] << tab << CfPatch[pFacei] << nl;
                 }
 
@@ -901,7 +901,7 @@ void Foam::fvDVM::CalcFluxSurf()
                     }
                     prim = ConservedToPrim(rho, rhoU, rhoE);
                     if (prim[0] < SMALL || prim[4] < SMALL)
-                        Info << "Error: moment_accumulator_first failed at zeroGradient patch face!" << tab
+                        Pout << "Error: moment_accumulator_first failed at zeroGradient patch face!" << tab
                              << prim[0] << tab << prim[4] << tab << CfPatch[pFacei] << nl;
                 }
 
@@ -1139,6 +1139,7 @@ void Foam::fvDVM::Update()
     const labelUList &owner = mesh_.faceOwner();
     const scalarField &Vol = mesh_.cellVolumes();
     const scalar dt = time_.deltaTValue();
+    const volVectorField &C = mesh_.C();
 
     forAll(cells, celli)
     {
@@ -1192,6 +1193,10 @@ void Foam::fvDVM::Update()
 
         // Update prim^{n+1}
         ConservedToPrim(rho, rhoU, rhoE, rhoVol_[celli], Uvol_[celli], lambdaVol_[celli]);
+        if (rhoVol_[celli] <= 0.0 || lambdaVol_[celli] <= 0.0)
+            Pout << "Error: negative density or lambda after update!"
+                 << tab << rhoVol_[celli] << tab << lambdaVol_[celli]
+                 << tab << C[celli] << nl;
 
         // Calculate heat flux at t=t^n
         vector qf = vector(0, 0, 0);
@@ -1869,6 +1874,7 @@ Foam::fvDVM::fvDVM(
       KInner_(DVMProperties.subDict("gasProperties").lookupOrDefault<label>("KInner", 0)),
       Gamma_(scalar(KInner_ + 5) / scalar(KInner_ + 3)),
       orderGlobal(DVMProperties.lookupOrDefault<label>("orderGlobal", 2)),
+      firstOrderSteps(DVMProperties.lookupOrDefault<label>("firstOrderSteps", 0)),
       DV_(0),
       rhoFluxSurf_(
           IOobject(
@@ -2059,7 +2065,7 @@ void Foam::fvDVM::getCoNum(scalar &maxCoNum, scalar &meanCoNum)
 
 void Foam::fvDVM::evolution()
 {
-    if (orderGlobal == 2)
+    if (orderGlobal == 2 && time_.timeIndex() > firstOrderSteps)
         Reconstruction();
     CheckReconstruction();
     CalcFluxSurf();

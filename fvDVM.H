@@ -109,6 +109,9 @@ class fvDVM
     //- indicator of Global Order, second order by default
     label orderGlobal;
 
+    //- Use first order to calculate the initial field during the firstOrderSteps
+    label firstOrderSteps;
+
     //- List of pointers to discrete velocities
     PtrList<DiscreteVelocityPoint> DV_;
 
