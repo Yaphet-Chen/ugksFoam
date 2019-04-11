@@ -246,7 +246,6 @@ void Foam::fvDVM::Reconstruction()
     {
         word type = rhoVol_.boundaryField()[patchi].type();
         fvPatchField<scalar> &rhoVolPatch = rhoVol_.boundaryFieldRef()[patchi];
-        fvPatchField<vector> &UvolPatch = Uvol_.boundaryFieldRef()[patchi];
         fvPatchField<scalar> &lambdaVolPatch = lambdaVol_.boundaryFieldRef()[patchi];
         const labelUList &pOwner = mesh_.boundary()[patchi].faceCells();
 
@@ -293,7 +292,10 @@ void Foam::fvDVM::CheckReconstruction()
         scalar rho;
         vector rhoU;
         scalar rhoE;
-        label myOrder = orderGlobal;
+        label myOrder = 1;
+
+        if (time_.timeIndex() > firstOrderSteps)
+            myOrder = orderGlobal;
 
         // Cell-faces information
         const cell myface = cells[celli];
