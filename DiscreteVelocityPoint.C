@@ -192,12 +192,7 @@ void Foam::DiscreteVelocityPoint::Reconstruction()
         const fvsPatchField<vector> &CfPatch = mesh_.Cf().boundaryField()[patchi];
         const labelUList &pOwner = mesh_.boundary()[patchi].faceCells();
 
-        if (type == "zeroGradient")
-        {
-            hVolPatch = hVolPatch.patchInternalField();
-            bVolPatch = bVolPatch.patchInternalField();
-        }
-        else if (type == "calculated")
+        if (type == "calculated")
         {
             forAll(hVolPatch, pfacei)
             {
@@ -242,8 +237,8 @@ void Foam::DiscreteVelocityPoint::DiscreteMaxwell(
     label D = mesh_.nSolutionD();
     label K = dvm_.KInner();
 
-    hEq = rho * pow(sqrt(lambda / pi), D) * exp(-lambda * magSqr(U - xi_));
-    bEq = (K + 3.0 - D) * hEq / (2.0 * lambda);
+    hEq == rho * pow(sqrt(lambda / pi), D) * exp(-lambda * magSqr(U - xi_));
+    bEq == (K + 3.0 - D) * hEq / (2.0 * lambda);
 }
 
 void Foam::DiscreteVelocityPoint::DiscreteMaxwell(

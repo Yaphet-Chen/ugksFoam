@@ -250,13 +250,7 @@ void Foam::fvDVM::Reconstruction()
         fvPatchField<scalar> &lambdaVolPatch = lambdaVol_.boundaryFieldRef()[patchi];
         const labelUList &pOwner = mesh_.boundary()[patchi].faceCells();
 
-        if (type == "zeroGradient")
-        {
-            rhoVolPatch = rhoVolPatch.patchInternalField();
-            UvolPatch = UvolPatch.patchInternalField();
-            lambdaVolPatch = lambdaVolPatch.patchInternalField();
-        }
-        else if (type == "calculated")
+        if (type == "calculated")
         {
             forAll(rhoVolPatch, pfacei)
             {
