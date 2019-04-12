@@ -160,6 +160,9 @@ public:
 
             //- Reconstruction the gradient of Discrete Velocity Point
             void Reconstruction();
+            
+            //- Inter-processor communication of hVol_, bVol_
+            void hbVolCommunicate();
 
             //- Update distribution function of Discrete Velocity Point
             void Update(scalar h, scalar b, label celli);

@@ -274,6 +274,14 @@ void Foam::fvDVM::Reconstruction()
     rhoEgradVol_.correctBoundaryConditions();
 }
 
+void Foam::fvDVM::hbVolCommunicate()
+{
+    forAll(DV_, DVid)
+    {
+        DV_[DVid].hbVolCommunicate();
+    }
+}
+
 /*---------------------------------------------------------------------------*\
  * @Brief       : Reconstruct primL primR at interface in global frame
  *                according to global order with blow-up guard
@@ -2063,6 +2071,8 @@ void Foam::fvDVM::evolution()
 {
     if (orderGlobal == 2 && time_.timeIndex() > firstOrderSteps)
         Reconstruction();
+    else
+        hbVolCommunicate();
     CheckReconstruction();
     CalcFluxSurf();
     Update();

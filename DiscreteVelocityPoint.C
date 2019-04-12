@@ -210,6 +210,12 @@ void Foam::DiscreteVelocityPoint::Reconstruction()
     bGradVol_.correctBoundaryConditions();
 }
 
+void Foam::DiscreteVelocityPoint::hbVolCommunicate()
+{
+    hVol_.correctBoundaryConditions();
+    bVol_.correctBoundaryConditions();
+}
+
 void Foam::DiscreteVelocityPoint::Update(scalar h, scalar b, label celli)
 {
     hVol_[celli] = h;

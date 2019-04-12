@@ -174,6 +174,9 @@ class fvDVM
     // Reconstruct the gradient of initial distribution function
     void Reconstruction();
 
+    // Inter-processor communication of hVol_, bVol_
+    void hbVolCommunicate();
+
     // Check if the reconstruction is reliable and assign the primL and primR at interface
     // If the reconstructed density or temperature is negative, set the cell order to first order
     void CheckReconstruction();
