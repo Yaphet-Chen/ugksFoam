@@ -274,8 +274,13 @@ void Foam::fvDVM::Reconstruction()
     rhoEgradVol_.correctBoundaryConditions();
 }
 
-void Foam::fvDVM::hbVolCommunicate()
+void Foam::fvDVM::MacroMicroCommunicate()
 {
+    // Prepare date for processor boundary
+    rhoVol_.correctBoundaryConditions();
+    Uvol_.correctBoundaryConditions();
+    lambdaVol_.correctBoundaryConditions();
+
     forAll(DV_, DVid)
     {
         DV_[DVid].hbVolCommunicate();
@@ -2072,7 +2077,7 @@ void Foam::fvDVM::evolution()
     if (orderGlobal == 2 && time_.timeIndex() > firstOrderSteps)
         Reconstruction();
     else
-        hbVolCommunicate();
+        MacroMicroCommunicate();
     CheckReconstruction();
     CalcFluxSurf();
     Update();
