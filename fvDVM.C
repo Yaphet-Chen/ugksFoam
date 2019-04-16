@@ -1229,12 +1229,12 @@ void Foam::fvDVM::Update()
             scalar Hold, Bold;
             scalar H, B;
             scalar h = dv.hVol()[celli], b = dv.bVol()[celli];
-            scalar timeFactor = 1.0 + 0.5 * dt / tau;
+            scalar timeFactor = 1.0 + dt / tau * (1 - exp(-dt / tau));
             equilibriumShakhov(Hold, Bold, rhoOld, Uold, lambdaOld, qf, dv.xi());
             equilibriumShakhov(H, B, rhoVol_[celli], Uvol_[celli], lambdaVol_[celli], qf, dv.xi());
 
-            h = 0.5 * dt * (H / tau + (Hold - h) / tauOld);
-            b = 0.5 * dt * (B / tau + (Bold - b) / tauOld);
+            h = dt * ((1 - exp(-dt / tau)) * H / tau + exp(-dt / tau) * (Hold - h) / tauOld);
+            b = dt * ((1 - exp(-dt / tau)) * B / tau + exp(-dt / tau) * (Bold - b) / tauOld);
 
             forAll(myface, index)
             {
